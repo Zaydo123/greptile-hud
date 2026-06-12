@@ -1,0 +1,6 @@
+# Build output
+GreptileHUD.app/
+*.app
+
+# macOS
+.DS_Store
