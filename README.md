@@ -22,6 +22,27 @@ No tokens to paste — it uses your existing `gh` CLI auth.
 
 PRs that are actively re-reviewing sort to the top.
 
+> **Latest review, not duplicate reviews.** Re-tagging `@greptile` sometimes makes
+> it post a *second* review comment instead of editing the first, leaving two
+> Greptile comments on the PR. The HUD reads the score/review-count from whichever
+> Greptile comment was **edited (`updated_at`) most recently** — Greptile revises its
+> review in place — so you always see the current one, not whichever was posted last.
+
+## Your Actions column (GitHub Actions / CI)
+
+When you have CI runs you kicked off — a **merge**, push, PR, or manual dispatch — a
+**Your Actions** column appears on the right listing them:
+
+| Element | Meaning |
+|---|---|
+| Workflow name + commit/PR title | The run; click to open it on GitHub |
+| Blue **running** + spinner + timer | In-flight — the timer counts up from when the run started |
+| Green **success** / red **failure** + duration | Finished — shows how long it took (kept ~30 min) |
+| Tooltip | `branch · event` (e.g. `main · push`) |
+
+Running actions sort to the top. Cron/`schedule` and other non-you triggers are
+filtered out, so it's only the work you set off.
+
 ## Requirements
 
 - `gh` CLI, logged in (`gh auth status` should show ✓) — already set up on this machine
@@ -62,6 +83,8 @@ Everything comes from the GitHub API via `gh`:
 - any comment carrying a 👀 reaction marks the PR as "reviewing"; the reaction's
   timestamp drives the live clock
 - the ↻ button posts `@greptile` as an issue comment
+- `repos/<repo>/actions/runs?actor=<you>` per open-PR repo → your CI runs for the
+  **Your Actions** column (filtered to merge/push/PR/dispatch events)
 
 ## Tuning
 

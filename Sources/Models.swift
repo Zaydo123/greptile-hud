@@ -18,3 +18,21 @@ struct PR: Identifiable, Equatable {
 
     var hasScore: Bool { scoreNum != nil && scoreDen != nil }
 }
+
+/// A GitHub Actions workflow run triggered by you (e.g. CI kicked off by a merge/push),
+/// shown in its own column with live state + how long it's been running.
+struct WorkflowRun: Identifiable, Equatable {
+    let id: Int             // run databaseId
+    let repo: String        // "owner/name"
+    let name: String        // workflow name
+    let title: String       // display_title (commit / PR title)
+    let branch: String
+    let event: String       // push, pull_request, merge_group, …
+    let url: String
+    let status: String      // queued | in_progress | completed
+    let conclusion: String? // success | failure | cancelled | … (nil while running)
+    let startedAt: Date?
+    let updatedAt: Date?
+
+    var isRunning: Bool { status != "completed" }
+}

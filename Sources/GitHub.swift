@@ -33,10 +33,24 @@ private struct SearchPR: Decodable {
     struct Repo: Decodable { let nameWithOwner: String }
 }
 
+private struct RunLine: Decodable {
+    let id: Int
+    let name: String?
+    let title: String?
+    let branch: String?
+    let event: String?
+    let url: String
+    let status: String
+    let conclusion: String?
+    let started: String?
+    let updated: String?
+}
+
 private struct CommentLine: Decodable {
     let login: String
     let id: Int
     let created: String
+    let updated: String?
     let eyes: Int
     let score: ScoreCap?
     let reviews: ReviewCap?
@@ -118,9 +132,43 @@ enum GH {
         }
     }
 
+    /// The authenticated user's login, resolved once (needed to filter Actions runs by actor).
+    private static var cachedLogin: String?
+    static func currentLogin() async -> String? {
+        if let l = cachedLogin { return l }
+        guard let data = try? await run(["api", "user", "--jq", ".login"]),
+              let s = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        cachedLogin = s
+        return s
+    }
+
+    private static let runsJQ = #"""
+.workflow_runs[] | {id: .id, name: .name, title: .display_title, branch: .head_branch, event: .event, url: .html_url, status: .status, conclusion: .conclusion, started: .run_started_at, updated: .updated_at}
+"""#
+
+    /// Recent Actions runs in `repo` that were triggered by `login` (merges, pushes, …).
+    static func fetchRuns(repo: String, login: String) async -> [WorkflowRun] {
+        guard let data = try? await run([
+            "api", "repos/\(repo)/actions/runs?actor=\(login)&per_page=20", "--jq", runsJQ
+        ]), let text = String(data: data, encoding: .utf8) else { return [] }
+        let dec = JSONDecoder()
+        var out: [WorkflowRun] = []
+        for raw in text.split(separator: "\n") {
+            guard let ld = raw.data(using: .utf8),
+                  let r = try? dec.decode(RunLine.self, from: ld) else { continue }
+            out.append(WorkflowRun(
+                id: r.id, repo: repo, name: r.name ?? "workflow", title: r.title ?? "",
+                branch: r.branch ?? "", event: r.event ?? "", url: r.url,
+                status: r.status, conclusion: r.conclusion,
+                startedAt: parseISO(r.started), updatedAt: parseISO(r.updated)))
+        }
+        return out
+    }
+
     // jq extracts only what we need (tiny payload): latest Greptile score, review count, eyes.
     private static let commentsJQ = #"""
-.[] | {login: .user.login, id: .id, created: .created_at, eyes: .reactions.eyes, score: ((.body|capture("Confidence Score:[^0-9]*(?<n>[0-9]+)[^0-9]+(?<d>[0-9]+)")?)//null), reviews: ((.body|capture("Reviews \\((?<r>[0-9]+)\\)")?)//null)}
+.[] | {login: .user.login, id: .id, created: .created_at, updated: .updated_at, eyes: .reactions.eyes, score: ((.body|capture("Confidence Score:[^0-9]*(?<n>[0-9]+)[^0-9]+(?<d>[0-9]+)")?)//null), reviews: ((.body|capture("Reviews \\((?<r>[0-9]+)\\)")?)//null)}
 """#
 
     private static let reactionJQ = #"""
@@ -136,8 +184,13 @@ enum GH {
             return pr
         }
 
-        var bestScore: (n: Int, d: Int, date: Date)?
+        // Re-tagging @greptile sometimes spawns a *second* review comment instead of
+        // editing the first, so several Greptile comments can carry a score. The current
+        // one is whichever was edited (updated_at) most recently — Greptile revises its
+        // review in place as it works — not whichever was posted (created_at) last.
+        var bestScore: (n: Int, d: Int)?
         var reviewCount: Int?
+        var bestEdited: Date?            // updated_at of the winning Greptile review comment
         var eyesComment: (id: Int, date: Date)?
         let dec = JSONDecoder()
 
@@ -145,16 +198,19 @@ enum GH {
             guard let ld = raw.data(using: .utf8),
                   let c = try? dec.decode(CommentLine.self, from: ld) else { continue }
             let isGreptile = c.login.lowercased().contains("greptile")
-            let date = parseISO(c.created) ?? .distantPast
+            let created = parseISO(c.created) ?? .distantPast
+            let edited = parseISO(c.updated) ?? created   // updated_at == created_at when never edited
 
-            if isGreptile, let s = c.score, let n = Int(s.n), let d = Int(s.d) {
-                if bestScore == nil || date > bestScore!.date { bestScore = (n, d, date) }
-            }
-            if isGreptile, let r = c.reviews, let rc = Int(r.r) {
-                reviewCount = rc   // comments are chronological asc → last greptile wins
+            // Score + review count both live in the same Greptile review body, so take
+            // them together from the single most-recently-edited review comment.
+            if isGreptile, let s = c.score, let n = Int(s.n), let d = Int(s.d),
+               bestEdited == nil || edited > bestEdited! {
+                bestEdited = edited
+                bestScore = (n, d)
+                reviewCount = c.reviews.flatMap { Int($0.r) }
             }
             if c.eyes > 0 {
-                if eyesComment == nil || date > eyesComment!.date { eyesComment = (c.id, date) }
+                if eyesComment == nil || created > eyesComment!.date { eyesComment = (c.id, created) }
             }
         }
 
@@ -190,6 +246,7 @@ enum GH {
 @MainActor
 final class PRStore: ObservableObject {
     @Published var prs: [PR] = []
+    @Published var runs: [WorkflowRun] = []   // your Actions runs (CI from merges/pushes)
     @Published var lastRefresh: Date?
     @Published var refreshing = false
     @Published var errorText: String?
@@ -214,9 +271,36 @@ final class PRStore: ObservableObject {
             }
             self.prs = enriched
             self.lastRefresh = Date()
+            await refreshRuns(for: enriched)
         } catch {
             self.errorText = friendly(error)
         }
+    }
+
+    /// Fetch your Actions runs across every repo with an open PR, keeping ones that are
+    /// in-flight or finished within the last 30 minutes. Running first, then newest.
+    private func refreshRuns(for prs: [PR]) async {
+        guard let login = await GH.currentLogin() else { return }
+        let repos = Set(prs.map { $0.repo })
+        guard !repos.isEmpty else { runs = []; return }
+
+        var all: [WorkflowRun] = []
+        await withTaskGroup(of: [WorkflowRun].self) { group in
+            for repo in repos { group.addTask { await GH.fetchRuns(repo: repo, login: login) } }
+            for await rs in group { all.append(contentsOf: rs) }
+        }
+
+        // Keep runs *you* set off — merges/pushes/PRs/manual — not cron or bot dispatches.
+        let userEvents: Set<String> = ["push", "merge_group", "pull_request",
+                                       "pull_request_target", "workflow_dispatch"]
+        let cutoff = Date().addingTimeInterval(-1800)   // 30 min
+        runs = all
+            .filter { userEvents.contains($0.event) }
+            .filter { $0.isRunning || ($0.updatedAt ?? .distantPast) > cutoff }
+            .sorted { a, b in
+                if a.isRunning != b.isRunning { return a.isRunning && !b.isRunning }
+                return (a.startedAt ?? .distantPast) > (b.startedAt ?? .distantPast)
+            }
     }
 
     func triggerReview(_ pr: PR) async {

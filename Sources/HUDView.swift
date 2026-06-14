@@ -25,19 +25,26 @@ struct HUDView: View {
     var onClose: () -> Void = {}
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            if let err = store.errorText {
-                Text(err)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16).padding(.bottom, 8)
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                header
+                if let err = store.errorText {
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16).padding(.bottom, 8)
+                }
+                Divider().opacity(0.12)
+                content
             }
-            Divider().opacity(0.12)
-            content
+            .frame(width: 540)
+
+            if !store.runs.isEmpty {
+                Divider().opacity(0.12)
+                RunsColumn(store: store).frame(width: 240)
+            }
         }
-        .frame(width: 540)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.10)))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -222,6 +229,121 @@ struct PRCard: View {
 
     private func elapsed(_ from: Date, _ now: Date) -> String {
         let s = max(0, Int(now.timeIntervalSince(from)))
+        let h = s / 3600, m = (s % 3600) / 60, sec = s % 60
+        if h > 0 { return "\(h)h \(m)m" }
+        if m > 0 { return "\(m)m \(sec)s" }
+        return "\(sec)s"
+    }
+}
+
+// MARK: - GitHub Actions column (CI you triggered, e.g. via merges)
+
+struct RunsColumn: View {
+    @ObservedObject var store: PRStore
+
+    private var runningCount: Int { store.runs.filter { $0.isRunning }.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                Image(systemName: "bolt.fill").font(.system(size: 13, weight: .semibold))
+                Text("Your Actions").font(.system(size: 14, weight: .bold))
+                Spacer()
+                if runningCount > 0 {
+                    HStack(spacing: 5) {
+                        Spinner(size: 9, color: .blue)
+                        Text("\(runningCount)").font(.system(size: 11, weight: .bold)).foregroundStyle(.blue)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Color.blue.opacity(0.16), in: Capsule())
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 13)
+            Divider().opacity(0.12)
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(store.runs) { run in RunRow(run: run) }
+                }
+                .padding(12)
+            }
+            .frame(maxHeight: 540)
+        }
+    }
+}
+
+struct RunRow: View {
+    let run: WorkflowRun
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(run.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+            if !run.title.isEmpty {
+                Text(run.title).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            HStack(spacing: 6) {
+                stateBadge
+                Spacer(minLength: 4)
+                timer
+            }
+        }
+        .padding(.horizontal, 11).padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(color.opacity(0.32), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .onTapGesture { if let u = URL(string: run.url) { NSWorkspace.shared.open(u) } }
+        .help("\(run.branch) · \(run.event)")
+    }
+
+    private var color: Color {
+        if run.isRunning { return .blue }
+        switch run.conclusion {
+        case "success": return .green
+        case "failure", "timed_out", "startup_failure": return .red
+        case "cancelled", "skipped": return .gray
+        default: return .yellow
+        }
+    }
+
+    private var label: String {
+        if run.status == "queued" { return "queued" }
+        if run.isRunning { return "running" }
+        return run.conclusion ?? "completed"
+    }
+
+    private var iconName: String {
+        if run.isRunning { return "" }
+        switch run.conclusion {
+        case "success": return "checkmark"
+        case "failure", "timed_out", "startup_failure": return "xmark"
+        case "cancelled", "skipped": return "minus"
+        default: return "questionmark"
+        }
+    }
+
+    private var stateBadge: some View {
+        HStack(spacing: 4) {
+            if run.isRunning { Spinner(size: 9, color: color) }
+            else { Image(systemName: iconName).font(.system(size: 9, weight: .bold)) }
+            Text(label).font(.system(size: 11, weight: .semibold))
+        }
+        .foregroundStyle(color)
+    }
+
+    @ViewBuilder private var timer: some View {
+        if run.isRunning, let start = run.startedAt {
+            TimelineView(.periodic(from: Date(), by: 1)) { ctx in
+                Text(duration(start, ctx.date))
+                    .font(.system(size: 11, weight: .semibold)).monospacedDigit().foregroundStyle(.secondary)
+            }
+        } else if let start = run.startedAt, let end = run.updatedAt {
+            Text(duration(start, end))
+                .font(.system(size: 11, weight: .semibold)).monospacedDigit().foregroundStyle(.secondary)
+        }
+    }
+
+    private func duration(_ from: Date, _ to: Date) -> String {
+        let s = max(0, Int(to.timeIntervalSince(from)))
         let h = s / 3600, m = (s % 3600) / 60, sec = s % 60
         if h > 0 { return "\(h)h \(m)m" }
         if m > 0 { return "\(m)m \(sec)s" }
