@@ -14,6 +14,8 @@ struct PR: Identifiable, Equatable {
     var reviewing: Bool = false
     var reviewingSince: Date?
     var updatedAt: Date?
+    var lastCommitAt: Date?        // head-commit time on the PR
+    var lastReviewAt: Date?        // when Greptile last revised its review (comment updated_at)
     var triggering: Bool = false   // optimistic local state while posting @greptile
 
     var hasScore: Bool { scoreNum != nil && scoreDen != nil }
@@ -35,4 +37,14 @@ struct WorkflowRun: Identifiable, Equatable {
     let updatedAt: Date?
 
     var isRunning: Bool { status != "completed" }
+}
+
+/// A recently merged pull request, for the "Merged" tab.
+struct MergedPR: Identifiable, Equatable {
+    let id: String          // "owner/repo#123"
+    let number: Int
+    let title: String
+    let repo: String        // "owner/name"
+    let url: String
+    let mergedAt: Date?
 }
