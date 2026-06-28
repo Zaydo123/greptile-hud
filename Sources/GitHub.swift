@@ -216,6 +216,8 @@ enum GH {
 
         if let b = bestScore { pr.scoreNum = b.n; pr.scoreDen = b.d }
         pr.reviewCount = reviewCount
+        pr.lastReviewAt = bestEdited
+        pr.lastCommitAt = await lastCommitDate(repo: pr.repo, number: pr.number)
 
         if let ec = eyesComment {
             pr.reviewing = true
@@ -231,6 +233,21 @@ enum GH {
             "api", "repos/\(repo)/issues/comments/\(commentId)/reactions", "--jq", reactionJQ
         ]), let text = String(data: data, encoding: .utf8) else { return nil }
         return text.split(separator: "\n").compactMap { parseISO(String($0)) }.max()
+    }
+
+    /// Head-commit timestamp of the PR — one cheap GraphQL call (commits(last:1)) so the
+    /// HUD can show when the PR was last pushed to.
+    private static func lastCommitDate(repo: String, number: Int) async -> Date? {
+        let parts = repo.split(separator: "/")
+        guard parts.count == 2 else { return nil }
+        let query = "query($owner:String!,$name:String!,$num:Int!){repository(owner:$owner,name:$name){pullRequest(number:$num){commits(last:1){nodes{commit{committedDate}}}}}}"
+        guard let data = try? await run([
+            "api", "graphql", "-f", "query=\(query)",
+            "-f", "owner=\(parts[0])", "-f", "name=\(parts[1])", "-F", "num=\(number)",
+            "--jq", ".data.repository.pullRequest.commits.nodes[0].commit.committedDate"
+        ]), let s = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        return parseISO(s)
     }
 
     /// Post an `@greptile` comment to kick off a fresh review.

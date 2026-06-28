@@ -14,6 +14,8 @@ struct PR: Identifiable, Equatable {
     var reviewing: Bool = false
     var reviewingSince: Date?
     var updatedAt: Date?
+    var lastCommitAt: Date?        // head-commit time on the PR
+    var lastReviewAt: Date?        // when Greptile last revised its review (comment updated_at)
     var triggering: Bool = false   // optimistic local state while posting @greptile
 
     var hasScore: Bool { scoreNum != nil && scoreDen != nil }

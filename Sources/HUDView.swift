@@ -144,6 +144,7 @@ struct PRCard: View {
                         }
                         if pr.reviewing { reviewingPill }
                     }
+                    freshnessLine
                 }
                 Spacer(minLength: 8)
                 rereviewButton
@@ -198,6 +199,36 @@ struct PRCard: View {
         }
         .padding(.horizontal, 8).padding(.vertical, 2)
         .background(Color.blue.opacity(0.18), in: Capsule())
+    }
+
+    // Push/review recency — when the PR last got a commit and when Greptile last reviewed.
+    @ViewBuilder private var freshnessLine: some View {
+        if pr.lastCommitAt != nil || pr.lastReviewAt != nil {
+            HStack(spacing: 8) {
+                if let c = pr.lastCommitAt {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 9))
+                        Text("last pushed \(ago(c)) ago").font(.system(size: 11))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                if let r = pr.lastReviewAt {
+                    HStack(spacing: 3) {
+                        Image(systemName: "checkmark.seal.fill").font(.system(size: 9))
+                        Text("last reviewed \(ago(r)) ago").font(.system(size: 11))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func ago(_ d: Date) -> String {
+        let s = max(0, Int(Date().timeIntervalSince(d)))
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m" }
+        if s < 86400 { return "\(s / 3600)h" }
+        return "\(s / 86400)d"
     }
 
     private var rereviewButton: some View {
