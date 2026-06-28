@@ -38,3 +38,13 @@ struct WorkflowRun: Identifiable, Equatable {
 
     var isRunning: Bool { status != "completed" }
 }
+
+/// A recently merged pull request, for the "Merged" tab.
+struct MergedPR: Identifiable, Equatable {
+    let id: String          // "owner/repo#123"
+    let number: Int
+    let title: String
+    let repo: String        // "owner/name"
+    let url: String
+    let mergedAt: Date?
+}

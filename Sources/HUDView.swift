@@ -18,16 +18,32 @@ struct Spinner: View {
     }
 }
 
+// MARK: - Safe URL open
+
+/// Open a URL string in the browser only if it's a web (http/https) scheme — defends against a
+/// non-web URL ever arriving from the GitHub API. (The System Settings deep-link in main.swift is a
+/// hardcoded x-apple.systempreferences: scheme and is intentionally not routed through here.)
+func openWebURL(_ string: String) {
+    guard let url = URL(string: string),
+          let scheme = url.scheme?.lowercased(),
+          scheme == "http" || scheme == "https" else { return }
+    NSWorkspace.shared.open(url)
+}
+
 // MARK: - Overlay
 
 struct HUDView: View {
     @ObservedObject var store: PRStore
     var onClose: () -> Void = {}
 
+    @State private var tab: Tab = .open
+    private enum Tab { case open, merged }
+
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 header
+                tabBar
                 if let err = store.errorText {
                     Text(err)
                         .font(.system(size: 11))
@@ -89,14 +105,43 @@ struct HUDView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if store.prs.isEmpty {
-            VStack(spacing: 8) {
-                Image(systemName: store.refreshing ? "hourglass" : "checkmark.seal")
-                    .font(.system(size: 26)).foregroundStyle(.secondary)
-                Text(store.refreshing ? "Loading your PRs…" : "No open PRs")
-                    .font(.system(size: 13)).foregroundStyle(.secondary)
+        switch tab {
+        case .open:   openContent
+        case .merged: mergedContent
+        }
+    }
+
+    // Segmented Open / Merged switcher for the main list.
+    private var tabBar: some View {
+        HStack(spacing: 6) {
+            tabButton("Open", count: store.prs.count, on: tab == .open) { tab = .open }
+            tabButton("Merged", count: store.merged.count, on: tab == .merged) { tab = .merged }
+            Spacer()
+        }
+        .padding(.horizontal, 14).padding(.bottom, 11)
+    }
+
+    private func tabButton(_ label: String, count: Int, on: Bool, _ act: @escaping () -> Void) -> some View {
+        Button(action: act) {
+            HStack(spacing: 6) {
+                Text(label).font(.system(size: 12, weight: .semibold))
+                if count > 0 {
+                    Text("\(count)").font(.system(size: 11, weight: .bold))
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(.white.opacity(on ? 0.18 : 0.10), in: Capsule())
+                }
             }
-            .frame(maxWidth: .infinity).padding(.vertical, 36)
+            .foregroundStyle(on ? Color.primary : .secondary)
+            .padding(.horizontal, 11).padding(.vertical, 5)
+            .background(on ? Color.white.opacity(0.12) : .clear, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder private var openContent: some View {
+        if store.prs.isEmpty {
+            emptyState(icon: store.refreshing ? "hourglass" : "checkmark.seal",
+                       text: store.refreshing ? "Loading your PRs…" : "No open PRs")
         } else {
             ScrollView {
                 VStack(spacing: 8) {
@@ -106,6 +151,29 @@ struct HUDView: View {
             }
             .frame(maxHeight: 540)
         }
+    }
+
+    @ViewBuilder private var mergedContent: some View {
+        if store.merged.isEmpty {
+            emptyState(icon: store.refreshing ? "hourglass" : "tray",
+                       text: store.refreshing ? "Loading…" : "No recent merges")
+        } else {
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(store.merged) { m in MergedRow(pr: m) }
+                }
+                .padding(12)
+            }
+            .frame(maxHeight: 540)
+        }
+    }
+
+    private func emptyState(icon: String, text: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon).font(.system(size: 26)).foregroundStyle(.secondary)
+            Text(text).font(.system(size: 13)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 36)
     }
 
     private func relative(_ d: Date) -> String {
@@ -159,7 +227,7 @@ struct PRCard: View {
                 .strokeBorder(statusColor.opacity(pr.reviewing ? 0.55 : 0.18), lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .onTapGesture { if let u = URL(string: pr.url) { NSWorkspace.shared.open(u) } }
+        .onTapGesture { openWebURL(pr.url) }
         .help(pr.url)
     }
 
@@ -322,7 +390,7 @@ struct RunRow: View {
         .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(color.opacity(0.32), lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .onTapGesture { if let u = URL(string: run.url) { NSWorkspace.shared.open(u) } }
+        .onTapGesture { openWebURL(run.url) }
         .help("\(run.branch) · \(run.event)")
     }
 
@@ -379,5 +447,49 @@ struct RunRow: View {
         if h > 0 { return "\(h)h \(m)m" }
         if m > 0 { return "\(m)m \(sec)s" }
         return "\(sec)s"
+    }
+}
+
+// MARK: - One merged-PR row (Merged tab)
+
+struct MergedRow: View {
+    let pr: MergedPR
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Rectangle().fill(Color.purple).frame(width: 5)
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.triangle.merge")
+                    .font(.system(size: 16, weight: .semibold)).foregroundStyle(.purple)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(pr.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                    HStack(spacing: 7) {
+                        Text(pr.repo.split(separator: "/").last.map(String.init) ?? pr.repo)
+                            .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+                        Text("#\(pr.number)").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                        if let m = pr.mergedAt {
+                            Text("· merged \(ago(m)) ago").font(.system(size: 12)).foregroundStyle(.secondary.opacity(0.8))
+                        }
+                    }
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+        }
+        .background(Color.purple.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
+            .strokeBorder(Color.purple.opacity(0.18), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .onTapGesture { openWebURL(pr.url) }
+        .help(pr.url)
+    }
+
+    private func ago(_ d: Date) -> String {
+        let s = max(0, Int(Date().timeIntervalSince(d)))
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m" }
+        if s < 86400 { return "\(s / 3600)h" }
+        return "\(s / 86400)d"
     }
 }

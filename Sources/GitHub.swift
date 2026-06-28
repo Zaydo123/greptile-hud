@@ -217,9 +217,18 @@ enum GH {
         if let b = bestScore { pr.scoreNum = b.n; pr.scoreDen = b.d }
         pr.reviewCount = reviewCount
         pr.lastReviewAt = bestEdited
-        pr.lastCommitAt = await lastCommitDate(repo: pr.repo, number: pr.number)
 
-        if let ec = eyesComment {
+        // Last-commit time + whether Greptile is actively reviewing, in one GraphQL call.
+        // The check-run is the authoritative "reviewing now" signal; the 👀 reaction below
+        // is a fallback because Greptile often clears it the moment the review finishes.
+        let head = await headState(repo: pr.repo, number: pr.number)
+        pr.lastCommitAt = head.committedDate
+        if head.reviewing {
+            pr.reviewing = true
+            pr.reviewingSince = head.reviewingSince
+        }
+
+        if !pr.reviewing, let ec = eyesComment {
             pr.reviewing = true
             let reactedAt = await eyesReactionDate(repo: pr.repo, commentId: ec.id)
             pr.reviewingSince = reactedAt ?? ec.date
@@ -235,19 +244,65 @@ enum GH {
         return text.split(separator: "\n").compactMap { parseISO(String($0)) }.max()
     }
 
-    /// Head-commit timestamp of the PR — one cheap GraphQL call (commits(last:1)) so the
-    /// HUD can show when the PR was last pushed to.
-    private static func lastCommitDate(repo: String, number: Int) async -> Date? {
+    /// Head commit's timestamp + whether Greptile is mid-review — one GraphQL call.
+    /// The "Greptile Review" check-run is the authoritative state (queued/in_progress while it
+    /// works, with a startedAt for the clock); the 👀 reaction the HUD used before is transient.
+    private struct HeadState { var committedDate: Date?; var reviewing = false; var reviewingSince: Date? }
+
+    private static func headState(repo: String, number: Int) async -> HeadState {
         let parts = repo.split(separator: "/")
-        guard parts.count == 2 else { return nil }
-        let query = "query($owner:String!,$name:String!,$num:Int!){repository(owner:$owner,name:$name){pullRequest(number:$num){commits(last:1){nodes{commit{committedDate}}}}}}"
+        guard parts.count == 2 else { return HeadState() }
+        let query = "query($owner:String!,$name:String!,$num:Int!){repository(owner:$owner,name:$name){pullRequest(number:$num){commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(last:30){nodes{__typename ... on CheckRun{name status startedAt conclusion}}}}}}}}}}"
+        let jq = #".data.repository.pullRequest.commits.nodes[0].commit as $c | {committed: $c.committedDate, greptile: (($c.statusCheckRollup.contexts.nodes // []) | map(select(.__typename=="CheckRun" and (.name|ascii_downcase|contains("greptile")))) | last)}"#
         guard let data = try? await run([
             "api", "graphql", "-f", "query=\(query)",
             "-f", "owner=\(parts[0])", "-f", "name=\(parts[1])", "-F", "num=\(number)",
-            "--jq", ".data.repository.pullRequest.commits.nodes[0].commit.committedDate"
-        ]), let s = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
-        return parseISO(s)
+            "--jq", jq
+        ]), let decoded = try? JSONDecoder().decode(HeadJSON.self, from: data) else { return HeadState() }
+
+        var st = HeadState()
+        st.committedDate = parseISO(decoded.committed)
+        if let g = decoded.greptile, let status = g.status {
+            switch status.uppercased() {
+            case "QUEUED", "IN_PROGRESS":
+                st.reviewing = true
+                st.reviewingSince = parseISO(g.startedAt)
+            default:
+                break
+            }
+        }
+        return st
+    }
+
+    private struct HeadJSON: Decodable {
+        let committed: String?
+        let greptile: GrepCheck?
+        struct GrepCheck: Decodable { let status: String?; let startedAt: String? }
+    }
+
+    private struct SearchMergedPR: Decodable {
+        let number: Int
+        let title: String
+        let url: String
+        let closedAt: String?
+        let repository: Repo
+        struct Repo: Decodable { let nameWithOwner: String }
+    }
+
+    /// Your most recently merged PRs, newest merge first.
+    static func fetchMergedPRs() async throws -> [MergedPR] {
+        let data = try await run([
+            "search", "prs", "--author=@me", "--merged",
+            "--sort", "updated", "--limit", "20",
+            "--json", "number,title,url,repository,closedAt"
+        ])
+        let items = try JSONDecoder().decode([SearchMergedPR].self, from: data)
+        return items
+            .map { i in MergedPR(id: "\(i.repository.nameWithOwner)#\(i.number)",
+                                 number: i.number, title: i.title,
+                                 repo: i.repository.nameWithOwner, url: i.url,
+                                 mergedAt: parseISO(i.closedAt)) }
+            .sorted { ($0.mergedAt ?? .distantPast) > ($1.mergedAt ?? .distantPast) }
     }
 
     /// Post an `@greptile` comment to kick off a fresh review.
@@ -264,6 +319,7 @@ enum GH {
 final class PRStore: ObservableObject {
     @Published var prs: [PR] = []
     @Published var runs: [WorkflowRun] = []   // your Actions runs (CI from merges/pushes)
+    @Published var merged: [MergedPR] = []    // your most recently merged PRs ("Merged" tab)
     @Published var lastRefresh: Date?
     @Published var refreshing = false
     @Published var errorText: String?
@@ -288,6 +344,7 @@ final class PRStore: ObservableObject {
             }
             self.prs = enriched
             self.lastRefresh = Date()
+            self.merged = (try? await GH.fetchMergedPRs()) ?? self.merged
             await refreshRuns(for: enriched)
         } catch {
             self.errorText = friendly(error)
