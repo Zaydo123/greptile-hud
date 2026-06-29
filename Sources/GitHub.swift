@@ -261,9 +261,16 @@ final class PRStore: ObservableObject {
         do {
             let base = try await GH.fetchOpenPRs()
             var enriched: [PR] = []
+            // Throttle to a small window so we don't fire every PR's requests at once and
+            // trip GitHub's secondary (anti-abuse) rate limit — which 403s the score fetches.
+            let maxConcurrent = 6
             await withTaskGroup(of: PR.self) { group in
-                for pr in base { group.addTask { await GH.enrich(pr) } }
-                for await p in group { enriched.append(p) }
+                var it = base.makeIterator()
+                for _ in 0..<maxConcurrent { if let pr = it.next() { group.addTask { await GH.enrich(pr) } } }
+                while let p = await group.next() {
+                    enriched.append(p)
+                    if let pr = it.next() { group.addTask { await GH.enrich(pr) } }
+                }
             }
             enriched.sort { a, b in
                 if a.reviewing != b.reviewing { return a.reviewing && !b.reviewing }

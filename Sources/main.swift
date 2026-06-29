@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         promptAccessibilityIfNeeded()
 
         Task { await store.refresh() }
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { await self?.store.refresh() }
         }
     }
