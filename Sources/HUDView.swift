@@ -37,7 +37,18 @@ struct HUDView: View {
     var onClose: () -> Void = {}
 
     @State private var tab: Tab = .open
+    @State private var showStale: Bool = false
     private enum Tab { case open, merged }
+
+    private static let staleThreshold: TimeInterval = 14 * 86400
+
+    private func isStale(_ pr: PR) -> Bool {
+        let last = pr.updatedAt ?? pr.lastCommitAt ?? .distantPast
+        return Date().timeIntervalSince(last) > Self.staleThreshold
+    }
+
+    private var freshPRs: [PR] { store.prs.filter { !isStale($0) } }
+    private var stalePRs: [PR] { store.prs.filter { isStale($0) } }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -145,12 +156,40 @@ struct HUDView: View {
         } else {
             ScrollView {
                 VStack(spacing: 8) {
-                    ForEach(store.prs) { pr in PRCard(pr: pr, store: store) }
+                    ForEach(freshPRs) { pr in PRCard(pr: pr, store: store) }
+                    if !stalePRs.isEmpty {
+                        staleDisclosure
+                        if showStale {
+                            ForEach(stalePRs) { pr in PRCard(pr: pr, store: store) }
+                        }
+                    }
                 }
                 .padding(12)
             }
             .frame(maxHeight: 540)
         }
+    }
+
+    private var staleDisclosure: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { showStale.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .rotationEffect(.degrees(showStale ? 90 : 0))
+                Text("\(showStale ? "Hide" : "Show") stale")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("\(stalePRs.count)")
+                    .font(.system(size: 11, weight: .bold))
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(.white.opacity(0.10), in: Capsule())
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10).padding(.vertical, 7)
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder private var mergedContent: some View {
