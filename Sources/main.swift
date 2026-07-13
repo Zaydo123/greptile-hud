@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = PRStore()
+    private let updater = UpdateController()
 
     private var panel: NSPanel!
     private var statusItem: NSStatusItem!
@@ -22,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         promptAccessibilityIfNeeded()
 
         Task { await store.refresh() }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await updater.checkForUpdates(userInitiated: false)
+        }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { await self?.store.refresh() }
         }
@@ -39,14 +44,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let show = NSMenuItem(title: "Show HUD (pinned)", action: #selector(togglePinned), keyEquivalent: "")
         let refresh = NSMenuItem(title: "Refresh now", action: #selector(refreshNow), keyEquivalent: "r")
+        let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         let hint = NSMenuItem(title: "Tip: hold Right Shift to peek", action: nil, keyEquivalent: "")
         hint.isEnabled = false
         let access = NSMenuItem(title: "Grant Accessibility Access…", action: #selector(openAccessibility), keyEquivalent: "")
         let quit = NSMenuItem(title: "Quit Greptile HUD", action: #selector(quitApp), keyEquivalent: "q")
-        [show, refresh, access, quit].forEach { $0.target = self }
+        [show, refresh, updates, access, quit].forEach { $0.target = self }
 
         menu.addItem(show)
         menu.addItem(refresh)
+        menu.addItem(updates)
         menu.addItem(.separator())
         menu.addItem(hint)
         menu.addItem(.separator())
@@ -58,7 +65,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Overlay panel
 
     private func buildPanel() {
-        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 588, height: 400),
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0,
+                                           width: HUDMetrics.panelWidth,
+                                           height: HUDMetrics.panelHeight),
                         styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered, defer: false)
         p.level = .screenSaver
@@ -69,6 +78,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.hidesOnDeactivate = false
         p.isFloatingPanel = true
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        p.contentMinSize = NSSize(width: HUDMetrics.panelWidth, height: HUDMetrics.panelHeight)
+        p.contentMaxSize = p.contentMinSize
 
         let host = NSHostingView(rootView: HUDView(store: store, onClose: { [weak self] in
             self?.pinned = false
@@ -81,11 +92,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func positionPanel() {
-        if let host = panel.contentView as? NSHostingView<HUDView> {
-            host.layoutSubtreeIfNeeded()
-            let fit = host.fittingSize
-            if fit.width > 1, fit.height > 1 { panel.setContentSize(fit) }
-        }
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         guard let visible = screen?.frame else { return }
@@ -160,6 +166,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func refreshNow() { Task { await store.refresh() } }
+
+    @objc private func checkForUpdates() {
+        Task { await updater.checkForUpdates(userInitiated: true) }
+    }
 
     @objc private func openAccessibility() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {

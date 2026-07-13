@@ -55,6 +55,23 @@ filtered out, so it's only the work you set off.
 open GreptileHUD.app
 ```
 
+## Updates and releases
+
+Greptile HUD checks GitHub Releases shortly after launch. You can also use the
+menu-bar icon ▸ **Check for Updates…**. Updates are downloaded from GitHub,
+verified against the release's SHA-256 checksum and app identity, installed, and
+then the app relaunches—no update server is required.
+
+To publish a release, push a version tag. The GitHub Actions workflow builds the
+app and attaches both the zip and checksum to a new GitHub Release:
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+The tag version must be greater than the version currently in `Info.plist`.
+
 ## First run — grant Accessibility (one time)
 
 Detecting a global key-hold requires Accessibility access. On first launch the
