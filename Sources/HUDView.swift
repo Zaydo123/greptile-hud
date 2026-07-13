@@ -1,6 +1,14 @@
 import SwiftUI
 import AppKit
 
+enum HUDMetrics {
+    static let contentWidth: CGFloat = 780
+    static let contentHeight: CGFloat = 560
+    static let padding: CGFloat = 24
+    static let panelWidth = contentWidth + padding * 2
+    static let panelHeight = contentHeight + padding * 2
+}
+
 // MARK: - Spinner (TimelineView so it animates even while our app isn't key)
 
 struct Spinner: View {
@@ -38,6 +46,7 @@ struct HUDView: View {
 
     @State private var tab: Tab = .open
     @State private var showStale: Bool = false
+    @State private var staleHovered: Bool = false
     private enum Tab { case open, merged }
 
     private static let staleThreshold: TimeInterval = 14 * 86400
@@ -56,63 +65,100 @@ struct HUDView: View {
                 header
                 tabBar
                 if let err = store.errorText {
-                    Text(err)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16).padding(.bottom, 8)
+                    HStack(spacing: 7) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(err).lineLimit(2)
+                        Spacer(minLength: 0)
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 11).padding(.vertical, 8)
+                    .background(Color.orange.opacity(0.10),
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .padding(.horizontal, 16).padding(.bottom, 10)
                 }
-                Divider().opacity(0.12)
+                Divider().opacity(0.10)
                 content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(width: 540)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if !store.runs.isEmpty {
-                Divider().opacity(0.12)
+                Divider().opacity(0.10)
                 RunsColumn(store: store).frame(width: 240)
             }
         }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.10)))
+        .frame(width: HUDMetrics.contentWidth, height: HUDMetrics.contentHeight)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.13)))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .shadow(color: .black.opacity(0.55), radius: 30, y: 14)
-        .padding(24)
+        .shadow(color: .black.opacity(0.48), radius: 28, y: 12)
+        .padding(HUDMetrics.padding)
         .preferredColorScheme(.dark)
     }
 
     private var reviewingCount: Int { store.prs.filter { $0.reviewing }.count }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "eyes").font(.system(size: 17, weight: .semibold))
-            Text("Greptile Reviews").font(.system(size: 16, weight: .bold))
+        HStack(spacing: 11) {
+            Image(systemName: "eyes")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.blue)
+                .frame(width: 34, height: 34)
+                .background(Color.blue.opacity(0.14),
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.blue.opacity(0.20)))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Greptile Reviews").font(.system(size: 15, weight: .bold))
+                Text("Pull request overview")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
             if !store.prs.isEmpty {
                 Text("\(store.prs.count)")
-                    .font(.system(size: 12, weight: .bold))
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(.white.opacity(0.14), in: Capsule())
+                    .font(.system(size: 11, weight: .bold))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(.white.opacity(0.10), in: Capsule())
             }
+            Spacer(minLength: 8)
             if reviewingCount > 0 {
                 HStack(spacing: 5) {
                     Spinner(size: 10, color: .blue)
-                    Text("\(reviewingCount) reviewing")
-                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(.blue)
+                    Text("\(reviewingCount) active")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.blue)
                 }
-                .padding(.horizontal, 9).padding(.vertical, 3)
-                .background(Color.blue.opacity(0.16), in: Capsule())
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.blue.opacity(0.13), in: Capsule())
             }
-            Spacer()
-            if store.refreshing { Spinner(size: 12, color: .secondary).frame(width: 14, height: 14) }
             if let d = store.lastRefresh {
-                Text(relative(d)).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(relative(d))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
+            Button { Task { await store.refresh() } } label: {
+                Group {
+                    if store.refreshing { Spinner(size: 12, color: .secondary) }
+                    else { Image(systemName: "arrow.clockwise") }
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 30, height: 30)
+                .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 9))
+            }
+            .buttonStyle(.plain)
+            .disabled(store.refreshing)
+            .help("Refresh now")
             Button(action: onClose) {
-                Image(systemName: "xmark.circle.fill").font(.system(size: 15)).foregroundStyle(.secondary)
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 9))
             }
             .buttonStyle(.plain)
             .help("Close")
         }
-        .padding(.horizontal, 16).padding(.vertical, 13)
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
     }
 
     @ViewBuilder private var content: some View {
@@ -124,29 +170,43 @@ struct HUDView: View {
 
     // Segmented Open / Merged switcher for the main list.
     private var tabBar: some View {
-        HStack(spacing: 6) {
-            tabButton("Open", count: store.prs.count, on: tab == .open) { tab = .open }
-            tabButton("Merged", count: store.merged.count, on: tab == .merged) { tab = .merged }
-            Spacer()
+        HStack(spacing: 4) {
+            tabButton("Open", icon: "arrow.triangle.branch", count: store.prs.count, on: tab == .open) {
+                tab = .open
+            }
+            tabButton("Merged", icon: "arrow.triangle.merge", count: store.merged.count, on: tab == .merged) {
+                tab = .merged
+            }
         }
-        .padding(.horizontal, 14).padding(.bottom, 11)
+        .padding(4)
+        .background(.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .strokeBorder(.white.opacity(0.06)))
+        .padding(.horizontal, 16).padding(.bottom, 12)
     }
 
-    private func tabButton(_ label: String, count: Int, on: Bool, _ act: @escaping () -> Void) -> some View {
+    private func tabButton(_ label: String, icon: String, count: Int, on: Bool,
+                           _ act: @escaping () -> Void) -> some View {
         Button(action: act) {
-            HStack(spacing: 6) {
+            HStack(spacing: 7) {
+                Image(systemName: icon).font(.system(size: 11, weight: .semibold))
                 Text(label).font(.system(size: 12, weight: .semibold))
-                if count > 0 {
-                    Text("\(count)").font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(.white.opacity(on ? 0.18 : 0.10), in: Capsule())
-                }
+                Text("\(count)")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(on ? Color.primary : .secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.white.opacity(on ? 0.12 : 0.06), in: Capsule())
             }
             .foregroundStyle(on ? Color.primary : .secondary)
-            .padding(.horizontal, 11).padding(.vertical, 5)
-            .background(on ? Color.white.opacity(0.12) : .clear, in: Capsule())
+            .frame(maxWidth: .infinity, minHeight: 34)
+            .background(on ? Color.white.opacity(0.11) : .clear,
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(.white.opacity(on ? 0.09 : 0)))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help("Show \(label.lowercased()) pull requests")
     }
 
     @ViewBuilder private var openContent: some View {
@@ -166,7 +226,7 @@ struct HUDView: View {
                 }
                 .padding(12)
             }
-            .frame(maxHeight: 540)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -174,22 +234,35 @@ struct HUDView: View {
         Button {
             withAnimation(.easeInOut(duration: 0.15)) { showStale.toggle() }
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
-                    .rotationEffect(.degrees(showStale ? 90 : 0))
-                Text("\(showStale ? "Hide" : "Show") stale")
+            HStack(spacing: 8) {
+                Image(systemName: "archivebox")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 20)
+                Text("Stale pull requests")
                     .font(.system(size: 12, weight: .semibold))
                 Text("\(stalePRs.count)")
-                    .font(.system(size: 11, weight: .bold))
-                    .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(.white.opacity(0.10), in: Capsule())
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.white.opacity(0.08), in: Capsule())
                 Spacer()
+                Text(showStale ? "Hide" : "Show")
+                    .font(.system(size: 11, weight: .semibold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .rotationEffect(.degrees(showStale ? 90 : 0))
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 10).padding(.vertical, 7)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 42)
+            .background(.white.opacity(staleHovered ? 0.09 : 0.045),
+                        in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(.white.opacity(staleHovered ? 0.13 : 0.065)))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { staleHovered = $0 }
+        .help(showStale ? "Hide stale pull requests" : "Show stale pull requests")
     }
 
     @ViewBuilder private var mergedContent: some View {
@@ -203,23 +276,27 @@ struct HUDView: View {
                 }
                 .padding(12)
             }
-            .frame(maxHeight: 540)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     private func emptyState(icon: String, text: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 26)).foregroundStyle(.secondary)
-            Text(text).font(.system(size: 13)).foregroundStyle(.secondary)
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 48, height: 48)
+                .background(.white.opacity(0.055), in: Circle())
+            Text(text).font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 36)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func relative(_ d: Date) -> String {
         let s = Int(Date().timeIntervalSince(d))
-        if s < 5 { return "synced just now" }
-        if s < 60 { return "synced \(s)s ago" }
-        return "synced \(s / 60)m ago"
+        if s < 5 { return "Just synced" }
+        if s < 60 { return "Synced \(s)s ago" }
+        return "Synced \(s / 60)m ago"
     }
 }
 
@@ -228,58 +305,60 @@ struct HUDView: View {
 struct PRCard: View {
     let pr: PR
     @ObservedObject var store: PRStore
+    @State private var hovered = false
 
     /// The one color that tells the whole story at a glance.
     private var statusColor: Color { pr.reviewing ? .blue : scoreColor }
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Status stripe — scan this column to read every PR's state instantly.
-            Rectangle().fill(statusColor).frame(width: 5)
-
-            HStack(spacing: 14) {
-                scoreBlock
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(pr.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                    HStack(spacing: 7) {
-                        Text(pr.repo.split(separator: "/").last.map(String.init) ?? pr.repo)
-                            .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
-                        Text("#\(pr.number)").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
-                        if let rc = pr.reviewCount {
-                            Text("· \(rc)×").font(.system(size: 12)).foregroundStyle(.secondary.opacity(0.7))
-                                .help("\(rc) Greptile review\(rc == 1 ? "" : "s")")
-                        }
-                        if pr.reviewing { reviewingPill }
+        HStack(spacing: 12) {
+            Capsule().fill(statusColor).frame(width: 4, height: 42)
+            scoreBlock
+            VStack(alignment: .leading, spacing: 5) {
+                Text(pr.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                HStack(spacing: 7) {
+                    Text(pr.repo.split(separator: "/").last.map(String.init) ?? pr.repo)
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+                    Text("#\(pr.number)")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    if let rc = pr.reviewCount {
+                        Text("\(rc) review\(rc == 1 ? "" : "s")")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary.opacity(0.75))
+                            .help("\(rc) Greptile review\(rc == 1 ? "" : "s")")
                     }
-                    freshnessLine
+                    if pr.reviewing { reviewingPill }
                 }
-                Spacer(minLength: 8)
-                rereviewButton
+                freshnessLine
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            Spacer(minLength: 8)
+            rereviewButton
         }
-        .background(statusColor.opacity(pr.reviewing ? 0.12 : 0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .padding(.horizontal, 12).padding(.vertical, 11)
+        .background(.white.opacity(hovered ? 0.085 : 0.05),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .strokeBorder(statusColor.opacity(pr.reviewing ? 0.55 : 0.18), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(pr.reviewing ? Color.blue.opacity(0.32) : Color.white.opacity(0.075), lineWidth: 1)
         )
-        .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture { openWebURL(pr.url) }
+        .onHover { hovered = $0 }
         .help(pr.url)
     }
 
     // Big, bold score — the primary thing your eye lands on.
     private var scoreBlock: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(scoreColor.opacity(0.20))
+            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(scoreColor.opacity(0.12))
             if pr.hasScore {
                 HStack(alignment: .firstTextBaseline, spacing: 1) {
                     Text("\(pr.scoreNum ?? 0)")
-                        .font(.system(size: 28, weight: .heavy, design: .rounded)).foregroundStyle(scoreColor)
+                        .font(.system(size: 24, weight: .bold, design: .rounded)).foregroundStyle(scoreColor)
                     Text("/\(pr.scoreDen ?? 5)")
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(scoreColor.opacity(0.75))
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(scoreColor.opacity(0.72))
                 }
             } else if pr.reviewing {
                 Spinner(size: 20, color: .blue)
@@ -287,8 +366,8 @@ struct PRCard: View {
                 Text("—").font(.system(size: 22, weight: .bold)).foregroundStyle(.secondary)
             }
         }
-        .frame(width: 60, height: 52)
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(scoreColor.opacity(0.4)))
+        .frame(width: 56, height: 48)
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(scoreColor.opacity(0.24)))
     }
 
     private var reviewingPill: some View {
@@ -297,15 +376,15 @@ struct PRCard: View {
             if let since = pr.reviewingSince {
                 TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                     Text(elapsed(since, ctx.date))
-                        .font(.system(size: 12, weight: .bold)).foregroundStyle(.blue)
+                        .font(.system(size: 10, weight: .semibold)).foregroundStyle(.blue)
                         .monospacedDigit()
                 }
             } else {
-                Text("reviewing…").font(.system(size: 12, weight: .bold)).foregroundStyle(.blue)
+                Text("reviewing").font(.system(size: 10, weight: .semibold)).foregroundStyle(.blue)
             }
         }
-        .padding(.horizontal, 8).padding(.vertical, 2)
-        .background(Color.blue.opacity(0.18), in: Capsule())
+        .padding(.horizontal, 7).padding(.vertical, 2)
+        .background(Color.blue.opacity(0.13), in: Capsule())
     }
 
     // Push/review recency — when the PR last got a commit and when Greptile last reviewed.
@@ -315,14 +394,14 @@ struct PRCard: View {
                 if let c = pr.lastCommitAt {
                     HStack(spacing: 3) {
                         Image(systemName: "arrow.up.circle.fill").font(.system(size: 9))
-                        Text("last pushed \(ago(c)) ago").font(.system(size: 11))
+                        Text("Pushed \(ago(c)) ago").font(.system(size: 10))
                     }
                     .foregroundStyle(.secondary)
                 }
                 if let r = pr.lastReviewAt {
                     HStack(spacing: 3) {
                         Image(systemName: "checkmark.seal.fill").font(.system(size: 9))
-                        Text("last reviewed \(ago(r)) ago").font(.system(size: 11))
+                        Text("Reviewed \(ago(r)) ago").font(.system(size: 10))
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -343,11 +422,12 @@ struct PRCard: View {
             Task { await store.triggerReview(pr) }
         } label: {
             ZStack {
-                Circle().fill(.white.opacity(0.10)).frame(width: 38, height: 38)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(.white.opacity(0.07)).frame(width: 34, height: 34)
                 if pr.triggering {
                     Spinner(size: 16, color: .primary)
                 } else {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 16, weight: .bold))
+                    Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .semibold))
                 }
             }
         }
@@ -383,9 +463,17 @@ struct RunsColumn: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 7) {
-                Image(systemName: "bolt.fill").font(.system(size: 13, weight: .semibold))
-                Text("Your Actions").font(.system(size: 14, weight: .bold))
+            HStack(spacing: 9) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.blue)
+                    .frame(width: 28, height: 28)
+                    .background(Color.blue.opacity(0.12),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Your Actions").font(.system(size: 13, weight: .bold))
+                    Text("Recent workflows").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
+                }
                 Spacer()
                 if runningCount > 0 {
                     HStack(spacing: 5) {
@@ -396,40 +484,47 @@ struct RunsColumn: View {
                     .background(Color.blue.opacity(0.16), in: Capsule())
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, 13)
-            Divider().opacity(0.12)
+            .padding(.horizontal, 13).padding(.vertical, 15)
+            Divider().opacity(0.10)
             ScrollView {
                 VStack(spacing: 8) {
                     ForEach(store.runs) { run in RunRow(run: run) }
                 }
                 .padding(12)
             }
-            .frame(maxHeight: 540)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
 
 struct RunRow: View {
     let run: WorkflowRun
+    @State private var hovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(run.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-            if !run.title.isEmpty {
-                Text(run.title).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-            }
-            HStack(spacing: 6) {
-                stateBadge
-                Spacer(minLength: 4)
-                timer
+        HStack(spacing: 9) {
+            Capsule().fill(color).frame(width: 3, height: 30)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(run.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                if !run.title.isEmpty {
+                    Text(run.title).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                HStack(spacing: 6) {
+                    stateBadge
+                    Spacer(minLength: 4)
+                    timer
+                }
             }
         }
-        .padding(.horizontal, 11).padding(.vertical, 9)
+        .padding(.horizontal, 10).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(color.opacity(0.32), lineWidth: 1))
+        .background(.white.opacity(hovered ? 0.085 : 0.045),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(.white.opacity(0.07), lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         .onTapGesture { openWebURL(run.url) }
+        .onHover { hovered = $0 }
         .help("\(run.branch) · \(run.event)")
     }
 
@@ -493,34 +588,38 @@ struct RunRow: View {
 
 struct MergedRow: View {
     let pr: MergedPR
+    @State private var hovered = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            Rectangle().fill(Color.purple).frame(width: 5)
-            HStack(spacing: 12) {
-                Image(systemName: "arrow.triangle.merge")
-                    .font(.system(size: 16, weight: .semibold)).foregroundStyle(.purple)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(pr.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                    HStack(spacing: 7) {
-                        Text(pr.repo.split(separator: "/").last.map(String.init) ?? pr.repo)
-                            .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
-                        Text("#\(pr.number)").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
-                        if let m = pr.mergedAt {
-                            Text("· merged \(ago(m)) ago").font(.system(size: 12)).foregroundStyle(.secondary.opacity(0.8))
-                        }
+        HStack(spacing: 12) {
+            Capsule().fill(Color.purple).frame(width: 4, height: 38)
+            Image(systemName: "arrow.triangle.merge")
+                .font(.system(size: 14, weight: .semibold)).foregroundStyle(.purple)
+                .frame(width: 36, height: 36)
+                .background(Color.purple.opacity(0.11),
+                            in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(pr.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                HStack(spacing: 7) {
+                    Text(pr.repo.split(separator: "/").last.map(String.init) ?? pr.repo)
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+                    Text("#\(pr.number)").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    if let m = pr.mergedAt {
+                        Text("Merged \(ago(m)) ago")
+                            .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary.opacity(0.8))
                     }
                 }
-                Spacer(minLength: 8)
             }
-            .padding(.horizontal, 14).padding(.vertical, 12)
+            Spacer(minLength: 8)
         }
-        .background(Color.purple.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
-            .strokeBorder(Color.purple.opacity(0.18), lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .padding(.horizontal, 12).padding(.vertical, 11)
+        .background(.white.opacity(hovered ? 0.085 : 0.05),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(.white.opacity(0.075), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture { openWebURL(pr.url) }
+        .onHover { hovered = $0 }
         .help(pr.url)
     }
 
