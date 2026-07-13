@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate scripts and metadata
+        run: |
+          bash -n build.sh scripts/next-version.sh
+          plutil -lint Info.plist
+          test "$(bash scripts/next-version.sh 1.1.0 v1.1.0)" = "1.1.1"
+          test "$(bash scripts/next-version.sh 1.2.0 v1.1.9)" = "1.2.0"
+          if bash scripts/next-version.sh 1.0.0 v1.1.0; then exit 1; fi
+
+      - name: Build universal app
+        run: ./build.sh
+
+      - name: Verify app
+        run: |
+          plutil -lint GreptileHUD.app/Contents/Info.plist
+          codesign --verify --deep --strict GreptileHUD.app
+          lipo GreptileHUD.app/Contents/MacOS/GreptileHUD -verify_arch x86_64 arm64
+          test "$(vtool -show-build GreptileHUD.app/Contents/MacOS/GreptileHUD | grep -c 'minos 13.0')" -eq 2
+          git diff --check

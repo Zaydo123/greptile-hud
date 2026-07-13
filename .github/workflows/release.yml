@@ -2,23 +2,54 @@ name: Release macOS app
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+    paths:
+      - "Sources/**"
+      - "scripts/**"
+      - "Info.plist"
+      - "build.sh"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: greptile-hud-release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Choose next release version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BASE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
+          LATEST_TAG="$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""')"
+          VERSION="$(bash scripts/next-version.sh "$BASE_VERSION" "${LATEST_TAG:-v0.0.0}")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building v$VERSION from $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build app
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./build.sh
+
+      - name: Verify app
         run: |
-          VERSION="${VERSION#v}" ./build.sh
+          bash -n build.sh scripts/next-version.sh
+          plutil -lint Info.plist GreptileHUD.app/Contents/Info.plist
+          codesign --verify --deep --strict GreptileHUD.app
+          lipo GreptileHUD.app/Contents/MacOS/GreptileHUD -verify_arch x86_64 arm64
+          test "$(vtool -show-build GreptileHUD.app/Contents/MacOS/GreptileHUD | grep -c 'minos 13.0')" -eq 2
 
       - name: Package and checksum
         run: |
@@ -28,4 +59,5 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" GreptileHUD.zip GreptileHUD.zip.sha256 --generate-notes --verify-tag
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" GreptileHUD.zip GreptileHUD.zip.sha256 --target "$GITHUB_SHA" --generate-notes --fail-on-no-commits

@@ -26,7 +26,10 @@ The app:
   and relaunch logic.
 - `Info.plist`: bundle metadata and source-of-truth version for local builds.
 - `build.sh`: universal macOS build and ad-hoc signing.
-- `.github/workflows/release.yml`: tag-triggered GitHub Release publishing.
+- `scripts/next-version.sh`: deterministic automatic patch-version selection.
+- `.github/workflows/ci.yml`: pull-request and branch build validation.
+- `.github/workflows/release.yml`: automatic GitHub Release publishing from
+  app changes on `main`.
 - `README.md`: user-facing setup and release documentation.
 
 `GreptileHUD.app/` is generated build output and must not be committed.
@@ -131,38 +134,32 @@ cannot reach GitHub. User-initiated checks should report their result.
 Releases use semantic versions and tags in the form `vMAJOR.MINOR.PATCH`, for
 example `v1.2.0`.
 
-Before tagging a release:
+Routine releases are automatic. When app code, build configuration, metadata, or
+the CI/release workflows change on `main`, `.github/workflows/release.yml`:
 
-1. Choose a version greater than the latest published release.
-2. Set both `CFBundleVersion` and `CFBundleShortVersionString` in `Info.plist` to
-   the same version without the `v` prefix.
-3. Update relevant release or user documentation.
-4. Run the full build and verification steps above.
-5. Commit all intended source changes. The release tag must point at that commit.
-6. Confirm the tag does not already exist locally or remotely.
+1. reads the major/minor release line from `Info.plist`;
+2. chooses the next patch after the latest published release using
+   `scripts/next-version.sh`;
+3. builds and validates the app;
+4. creates the tag at the exact triggering commit; and
+5. publishes the zip and checksum through GitHub Releases.
 
-Create and publish the release tag only when explicitly authorized to push:
-
-```bash
-git tag -a v1.2.0 -m "Greptile HUD 1.2.0"
-git push origin HEAD
-git push origin v1.2.0
-```
-
-Pushing the tag triggers `.github/workflows/release.yml`. The workflow strips the
-leading `v`, injects that version into the built app, creates the universal zip
-and checksum, then publishes both through GitHub Releases.
+Do not manually tag routine patch releases. For an intentional major or minor
+release, set both `CFBundleVersion` and `CFBundleShortVersionString` in
+`Info.plist` to the desired new baseline (for example `1.2.0`) before merging.
+The release workflow will use that baseline, then auto-increment subsequent
+patches.
 
 After publishing, verify the workflow and assets:
 
 ```bash
 gh run list --workflow release.yml --limit 5
-gh release view v1.2.0
+gh release view --json tagName,url,assets
 ```
 
-Do not create, move, or delete tags, push commits, or publish releases unless the
-user explicitly asks. Never reuse a published version tag; bump the version and
-create a new tag instead.
+Do not create, move, or delete tags, push commits, or publish releases manually
+unless the user explicitly asks for recovery or exceptional release work. Never
+reuse a published version tag.
 
 ## Signing note
 

@@ -57,20 +57,24 @@ open GreptileHUD.app
 
 ## Updates and releases
 
-Greptile HUD checks GitHub Releases shortly after launch. You can also use the
-menu-bar icon ▸ **Check for Updates…**. Updates are downloaded from GitHub,
-verified against the release's SHA-256 checksum and app identity, installed, and
-then the app relaunches—no update server is required.
+Greptile HUD checks GitHub Releases shortly after launch and every six hours
+while it remains open. You can also use the menu-bar icon ▸ **Check for
+Updates…**. Choose **Install Update** and the app downloads the release from
+GitHub, verifies its SHA-256 checksum, bundle identity, version, and signature,
+replaces itself safely, and relaunches. There is no zip extraction or manual app
+swapping, and no update server is required.
 
-To publish a release, push a version tag. The GitHub Actions workflow builds the
-app and attaches both the zip and checksum to a new GitHub Release:
+Pull requests and non-main branches are compiled by `.github/workflows/ci.yml`.
+When an app change reaches `main`, `.github/workflows/release.yml` automatically:
 
-```bash
-git tag v1.1.0
-git push origin v1.1.0
-```
+- chooses the next patch version after the latest GitHub Release;
+- builds and validates the universal Intel/Apple Silicon app;
+- creates the version tag and GitHub Release; and
+- uploads `GreptileHUD.zip` and its checksum for the updater.
 
-The tag version must be greater than the version currently in `Info.plist`.
+Routine releases need no manual tagging. For an intentional major/minor release,
+update both version values in `Info.plist` before merging; CI continues patch
+versions within that release line automatically.
 
 ## First run — grant Accessibility (one time)
 
@@ -87,7 +91,8 @@ That's the only setup. After that, just hold Right Shift anywhere.
 
 - **Show HUD (pinned)** — keep the overlay open so you can click around without
   holding Shift (Esc or the ✕ closes it)
-- **Refresh now** — force a resync (it also auto-refreshes every 30s and on every peek)
+- **Refresh now** — force a resync (it also auto-refreshes every 60s and on every peek)
+- **Check for Updates…** — check immediately; background checks also run every six hours
 - **Quit**
 
 ## How it works

@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var localMonitor: Any?
     private var escMonitor: Any?
     private var refreshTimer: Timer?
+    private var updateCheckTimer: Timer?
 
     private var rightShiftDown = false
     private var pinned = false
@@ -26,6 +27,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             await updater.checkForUpdates(userInitiated: false)
+        }
+        updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
+            Task { await self?.updater.checkForUpdates(userInitiated: false) }
         }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { await self?.store.refresh() }

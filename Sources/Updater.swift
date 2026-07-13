@@ -53,7 +53,13 @@ final class UpdateController {
             let response = showUpdatePrompt(version: available)
             switch response {
             case .alertFirstButtonReturn:
-                try await downloadAndInstall(release: release, version: available)
+                do {
+                    try await downloadAndInstall(release: release, version: available)
+                } catch {
+                    // The prompt makes this a user-visible install even when the check was
+                    // automatic, so installation failures should never disappear silently.
+                    showAlert(title: "Couldn’t install the update", message: error.localizedDescription)
+                }
             case .alertThirdButtonReturn:
                 NSWorkspace.shared.open(release.htmlURL)
             default:
