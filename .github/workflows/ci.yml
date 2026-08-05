@@ -62,13 +62,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Check landing page
+      - name: Check landing page (embedded in backend)
         run: |
-          test -f site/index.html
-          grep -q "releases/latest/download/GreptileHUD.zip" site/index.html
-          grep -q "releases/latest/download/GreptileHUD.zip.sha256" site/index.html
-          grep -q "api.github.com/repos/Zaydo123/greptile-hud/releases/latest" site/index.html
-          ruby -e "require 'yaml'; YAML.load_file('site/../render.yaml'); puts 'render.yaml parses'"
+          test -f backend/site/index.html
+          grep -q "releases/latest/download/GreptileHUD.zip" backend/site/index.html
+          grep -q "releases/latest/download/GreptileHUD.zip.sha256" backend/site/index.html
+          grep -q "api.github.com/repos/Zaydo123/greptile-hud/releases/latest" backend/site/index.html
+          grep -q "go:embed site/index.html" backend/main.go
+          ruby -e "require 'yaml'; YAML.load_file('render.yaml'); puts 'render.yaml parses'"
 
       - name: Check Render blueprint covers everything
         run: |
@@ -77,10 +78,7 @@ jobs:
             spec = YAML.load_file("render.yaml")
             names = spec["services"].map { |s| s["name"] }
             abort "backend missing" unless names.include?("greptile-hud")
-            abort "landing missing" unless names.include?("greptile-hud-landing")
             abort "db missing" unless spec["databases"]&.any? { |d| d["name"] == "greptile-hud-db" }
-            landing = spec["services"].find { |s| s["name"] == "greptile-hud-landing" }
-            abort "not static" unless landing["staticPublishPath"] == "./site"
             backend = spec["services"].find { |s| s["name"] == "greptile-hud" }
             abort "bad health check" unless backend["healthCheckPath"] == "/api/health"
             abort "rootDir set (Render ignores it; Dockerfile must be at repo root)" if backend["rootDir"]

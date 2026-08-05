@@ -1,8 +1,8 @@
 # Render blueprint: deploys the whole Greptile HUD stack.
 #
 # Connect this repo in Render ("New" -> "Blueprint"), and it provisions:
-#   - the backend API at https://greptile-hud.onrender.com (service name pinned)
-#   - the landing page at https://greptile-hud-landing.onrender.com
+#   - the backend API + landing page (embedded in the binary) at
+#     https://greptile-hud.onrender.com (service name pinned)
 #   - a Postgres database
 #
 # To get from "connect" to "live", only two manual steps remain:
@@ -12,6 +12,10 @@
 #      environment (they are secrets and cannot live in the repo). Register
 #      the same values in the GitHub OAuth app with callback:
 #      https://greptile-hud.onrender.com/auth/callback
+#
+# Custom domain (goathud.com): add it under the service's
+# Settings -> Custom Domains (DNS is already a CNAME to
+# greptile-hud.onrender.com); Render issues the TLS cert automatically.
 
 services:
   - type: web
@@ -37,16 +41,6 @@ services:
         value: greptilehud
       - key: GITHUB_ORGS
         sync: false
-
-  - type: web
-    name: greptile-hud-landing
-    runtime: static
-    staticPublishPath: ./site
-    plan: free
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
 
 databases:
   - name: greptile-hud-db

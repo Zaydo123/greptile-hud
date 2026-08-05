@@ -8,12 +8,14 @@ Render. See `backend/README.md` for setup and API docs.
 
 ## Landing page and hosting
 
-- `site/` — a static landing page (the funny one) with a download button that
-  always points at the latest GitHub Release via
-  `releases/latest/download/GreptileHUD.zip`. Point `goathud.com` at its Render
-  URL (or use the default `*.onrender.com`).
+- `backend/site/` — the landing page (the funny one), embedded into the Go
+  binary and served at `/` alongside the API. Its download button always
+  points at the latest GitHub Release via
+  `releases/latest/download/GreptileHUD.zip`.
+- `goathud.com` is a CNAME to `greptile-hud.onrender.com`; add the domain in
+  Render's Custom Domains settings and the TLS cert is issued automatically.
 - `render.yaml` — a Render Blueprint that deploys the whole stack in one
-  "connect repo" step: the Go backend, the landing page, and Postgres.
+  "connect repo" step: the Go backend (API + landing page) and Postgres.
   See `backend/README.md` for the GitHub OAuth app setup it expects.
 
 **Hold Right Shift** → a translucent overlay appears showing every open PR you

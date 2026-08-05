@@ -1,7 +1,6 @@
-# Keep the Docker build context small: only backend/ is needed.
+# Keep the Docker build context small: only backend/ (incl. its embedded site/) is needed.
 .git
 GreptileHUD.app/
-site/
 scripts/
 Sources/
 .github/

@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,6 +11,9 @@ import (
 	"strings"
 	"time"
 )
+
+//go:embed site/index.html
+var landingHTML []byte
 
 var logger = log.New(os.Stderr, "", log.LstdFlags)
 
@@ -101,6 +105,18 @@ func main() {
 	mux.HandleFunc("GET /api/tokens", s.handleListTokens)
 	mux.HandleFunc("POST /api/tokens", s.handleCreateToken)
 	mux.HandleFunc("DELETE /api/tokens/", s.handleDeleteToken)
+
+	// Landing page (site/), embedded into the binary so goathud.com serves the
+	// marketing site and the API from one service.
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write(landingHTML)
+	})
 
 	handler := logRequests(mux)
 	addr := ":" + cfg.port

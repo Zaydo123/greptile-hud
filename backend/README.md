@@ -10,7 +10,10 @@ single Go binary that:
 - exposes leaderboards and an "online now" feed over a small REST API.
 
 The frontend is the Greptile HUD Swift app (this repo), not a website. The API
-is consumed by the app and by `client/devtime.sh`.
+is consumed by the app and by `client/devtime.sh`. The landing page
+(`site/index.html`) is embedded into the binary and served at `/`, so
+`goathud.com` (CNAME → `greptile-hud.onrender.com`) serves marketing + API
+from the same service.
 
 ## Stack
 
