@@ -95,7 +95,7 @@ func vcCount(_ n: Int64) -> String {
 // MARK: - Store
 
 @MainActor
-final class VibecodersStore: ObservableObject {
+final class VibecodersStore: NSObject, ObservableObject, ASWebAuthenticationPresentationContextProviding {
     static let apiBaseURL = URL(string: "https://greptile-hud.onrender.com")!
     static let callbackScheme = "greptilehud"
 
@@ -110,6 +110,19 @@ final class VibecodersStore: ObservableObject {
     @Published var errorText: String?
 
     private var session: ASWebAuthenticationSession?
+
+    /// macOS 13+ requires a presentation anchor; menu-bar apps have no window,
+    /// so the OAuth sheet anchors to this invisible 1×1 window.
+    private lazy var anchorWindow: NSWindow = {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1),
+                         styleMask: [.borderless], backing: .buffered, defer: false)
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.hasShadow = false
+        w.ignoresMouseEvents = true
+        w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        return w
+    }()
 
     private static let tokenKey = "vibecoders.token"
     private static let loginKey = "vibecoders.login"
@@ -136,6 +149,7 @@ final class VibecodersStore: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.session = nil
+                self.anchorWindow.orderOut(nil)
                 if let error {
                     let nserr = error as NSError
                     if nserr.code != ASWebAuthenticationSessionError.canceledLogin.rawValue {
@@ -147,8 +161,22 @@ final class VibecodersStore: ObservableObject {
             }
         }
         session.prefersEphemeralWebBrowserSession = false
+        session.presentationContextProvider = self
         self.session = session
         _ = session.start()
+    }
+
+    // MARK: ASWebAuthenticationPresentationContextProviding
+
+    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        MainActor.assumeIsolated {
+            if let screen = NSScreen.main {
+                let f = screen.frame
+                anchorWindow.setFrameOrigin(NSPoint(x: f.midX, y: f.midY))
+            }
+            anchorWindow.orderFrontRegardless()
+            return anchorWindow
+        }
     }
 
     /// Handles `greptilehud://oauth/callback?token=…&login=…` (also used for
