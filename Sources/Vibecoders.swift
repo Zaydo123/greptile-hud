@@ -1,5 +1,6 @@
 import AppKit
 import AuthenticationServices
+import Combine
 import Foundation
 
 // MARK: - API shapes (backend: greptilehud/backend, see backend/README.md)
@@ -67,7 +68,7 @@ enum VCError: Error {
     case failed(String)
 }
 
-func friendly(_ error: Error) -> String {
+func vcFriendly(_ error: Error) -> String {
     if let e = error as? VCError {
         switch e {
         case .unauthorized: return "Not signed in anymore"
@@ -102,7 +103,7 @@ final class VibecodersStore: ObservableObject {
     @Published private(set) var stats = VCStats()
     @Published private(set) var online: [VCOnlineUser] = []
     @Published private(set) var boards: [VCMetric: [VCLeaderboardEntry]] = [:]
-    @Published private(set) var selectedMetric: VCMetric = .devtime
+    @Published var selectedMetric: VCMetric = .devtime
     @Published private(set) var devtimeToday: Int64 = 0
     @Published private(set) var syncing = false
     @Published private(set) var lastRefresh: Date?
@@ -115,7 +116,7 @@ final class VibecodersStore: ObservableObject {
 
     var isSignedIn: Bool { user != nil }
 
-    var login: String { user?.login ?? UserDefaults.standard.string(forKey: Self.loginKey) }
+    var login: String { user?.login ?? UserDefaults.standard.string(forKey: Self.loginKey) ?? "" }
 
     private var token: String? {
         get { UserDefaults.standard.string(forKey: Self.tokenKey) }
@@ -204,7 +205,7 @@ final class VibecodersStore: ObservableObject {
         } catch VCError.unauthorized {
             signOut()
         } catch {
-            errorText = friendly(error)
+            errorText = vcFriendly(error)
         }
     }
 
@@ -216,7 +217,7 @@ final class VibecodersStore: ObservableObject {
             do {
                 _ = try await post("/api/sync")
             } catch {
-                errorText = friendly(error)
+                errorText = vcFriendly(error)
             }
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             await refresh()

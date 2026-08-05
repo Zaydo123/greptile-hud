@@ -42,12 +42,13 @@ func openWebURL(_ string: String) {
 
 struct HUDView: View {
     @ObservedObject var store: PRStore
+    @ObservedObject var vibecoders: VibecodersStore
     var onClose: () -> Void = {}
 
     @State private var tab: Tab = .open
     @State private var showStale: Bool = false
     @State private var staleHovered: Bool = false
-    private enum Tab { case open, merged }
+    private enum Tab { case open, merged, crew }
 
     private static let staleThreshold: TimeInterval = 14 * 86400
 
@@ -165,10 +166,11 @@ struct HUDView: View {
         switch tab {
         case .open:   openContent
         case .merged: mergedContent
+        case .crew:   crewContent
         }
     }
 
-    // Segmented Open / Merged switcher for the main list.
+    // Segmented Open / Merged / Crew switcher for the main list.
     private var tabBar: some View {
         HStack(spacing: 4) {
             tabButton("Open", icon: "arrow.triangle.branch", count: store.prs.count, on: tab == .open) {
@@ -176,6 +178,9 @@ struct HUDView: View {
             }
             tabButton("Merged", icon: "arrow.triangle.merge", count: store.merged.count, on: tab == .merged) {
                 tab = .merged
+            }
+            tabButton("Crew", icon: "person.3", count: vibecoders.online.count, on: tab == .crew) {
+                tab = .crew
             }
         }
         .padding(4)
@@ -290,6 +295,215 @@ struct HUDView: View {
             Text(text).font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: Crew tab (vibecoders)
+
+    @ViewBuilder private var crewContent: some View {
+        if !vibecoders.isSignedIn {
+            VStack(spacing: 14) {
+                Image(systemName: "person.3")
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(.purple)
+                    .frame(width: 56, height: 56)
+                    .background(Color.purple.opacity(0.12), in: Circle())
+                Text("Join the vibecoders leaderboard")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Sign in with GitHub to see who's online, who vibes hardest,\nand exactly how much devtime you've banked today.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button {
+                    vibecoders.signIn()
+                } label: {
+                    Text("Sign in with GitHub")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(Color.purple.opacity(0.85),
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.purple.opacity(0.5)))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if let err = vibecoders.errorText {
+                    Text(err).font(.system(size: 11)).foregroundStyle(.orange)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(spacing: 0) {
+                crewHeader
+                Divider().opacity(0.10)
+                ScrollView {
+                    VStack(spacing: 14) {
+                        onlineStrip
+                        leaderboardBlock
+                    }
+                    .padding(12)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private var crewHeader: some View {
+        HStack(spacing: 10) {
+            if let url = vibecoders.user?.avatarUrl, let u = URL(string: url) {
+                AsyncImage(url: u) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Image(systemName: "person.crop.circle.fill").foregroundStyle(.secondary)
+                }
+                .frame(width: 30, height: 30)
+                .clipShape(Circle())
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 30)).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text("@\(vibecoders.login)").font(.system(size: 13, weight: .bold))
+                if let name = vibecoders.user?.name {
+                    Text(name).font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                Image(systemName: "bolt.fill").font(.system(size: 9, weight: .semibold)).foregroundStyle(.purple)
+                Text("\(vcDuration(vibecoders.devtimeToday)) today")
+                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+            }
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(Color.purple.opacity(0.13), in: Capsule())
+            Button {
+                vibecoders.syncNow()
+            } label: {
+                Group {
+                    if vibecoders.syncing { Spinner(size: 11, color: .secondary) }
+                    else { Image(systemName: "arrow.clockwise") }
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 28, height: 28)
+                .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .disabled(vibecoders.syncing)
+            .help("Sync GitHub stats now")
+            Button {
+                vibecoders.signOut()
+            } label: {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .help("Sign out")
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+    }
+
+    private var onlineStrip: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("Online now")
+                    .font(.system(size: 10, weight: .bold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(.secondary)
+                    .kerning(1.2)
+                if !vibecoders.online.isEmpty {
+                    Circle().fill(Color.green).frame(width: 6, height: 6)
+                }
+                Spacer()
+            }
+            if vibecoders.online.isEmpty {
+                Text("Nobody vibing right now — first heartbeat within 5 minutes of launching an editor counts.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(vibecoders.online, id: \.login) { u in
+                            HStack(spacing: 7) {
+                                Circle().fill(Color.green).frame(width: 7, height: 7)
+                                if let url = u.avatarUrl, let uu = URL(string: url) {
+                                    AsyncImage(url: uu) { img in
+                                        img.resizable().scaledToFill()
+                                    } placeholder: {
+                                        Image(systemName: "person.crop.circle.fill").foregroundStyle(.secondary)
+                                    }
+                                    .frame(width: 20, height: 20).clipShape(Circle())
+                                }
+                                Text(u.name ?? u.login).font(.system(size: 12, weight: .semibold))
+                                Text(vcDuration(u.devtimeToday))
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary).monospacedDigit()
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(.white.opacity(0.05),
+                                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(11)
+        .background(.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(.white.opacity(0.06)))
+    }
+
+    private var leaderboardBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Leaderboard")
+                    .font(.system(size: 10, weight: .bold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(.secondary)
+                    .kerning(1.2)
+                Spacer(minLength: 4)
+                ForEach(VCMetric.allCases, id: \.self) { m in
+                    metricButton(m, on: vibecoders.selectedMetric == m) {
+                        vibecoders.selectedMetric = m
+                    }
+                }
+            }
+            let entries = vibecoders.leaderboard(for: vibecoders.selectedMetric)
+            if entries.isEmpty {
+                Text("No stats yet — stats sync after sign-in and every few hours.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center).padding(.vertical, 18)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(entries.prefix(10), id: \.login) { e in
+                        CrewRow(entry: e, metric: vibecoders.selectedMetric)
+                    }
+                }
+            }
+            if let err = vibecoders.errorText {
+                Text(err).font(.system(size: 10)).foregroundStyle(.orange)
+            }
+        }
+        .padding(11)
+        .background(.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(.white.opacity(0.06)))
+    }
+
+    private func metricButton(_ m: VCMetric, on: Bool, _ act: @escaping () -> Void) -> some View {
+        Button(action: act) {
+            Text(m.label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(on ? Color.primary : .secondary)
+                .padding(.horizontal, 9).padding(.vertical, 5)
+                .background(on ? Color.purple.opacity(0.22) : .clear,
+                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(.white.opacity(on ? 0.10 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show \(m.label.lowercased()) leaderboard")
     }
 
     private func relative(_ d: Date) -> String {
@@ -581,6 +795,62 @@ struct RunRow: View {
         if h > 0 { return "\(h)h \(m)m" }
         if m > 0 { return "\(m)m \(sec)s" }
         return "\(sec)s"
+    }
+}
+
+// MARK: - One leaderboard row (Crew tab)
+
+struct CrewRow: View {
+    let entry: VCLeaderboardEntry
+    let metric: VCMetric
+    @State private var hovered = false
+
+    private var rankColor: Color {
+        switch entry.rank {
+        case 1: return Color(red: 0.98, green: 0.75, blue: 0.14)   // gold
+        case 2: return Color(red: 0.75, green: 0.78, blue: 0.84)   // silver
+        case 3: return Color(red: 0.75, green: 0.47, blue: 0.23)   // bronze
+        default: return .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("\(entry.rank)")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(rankColor)
+                .frame(width: 22)
+            if let url = entry.avatarUrl, let u = URL(string: url) {
+                AsyncImage(url: u) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Image(systemName: "person.crop.circle.fill").foregroundStyle(.secondary)
+                }
+                .frame(width: 24, height: 24).clipShape(Circle())
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 24)).foregroundStyle(.secondary)
+            }
+            Text(entry.name ?? entry.login)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+            if entry.online {
+                Circle().fill(Color.green).frame(width: 7, height: 7)
+                    .shadow(color: .green, radius: 3)
+                    .help("Online now")
+            }
+            Spacer(minLength: 6)
+            Text(metric.format(entry.value))
+                .font(.system(size: 13, weight: .bold)).monospacedDigit()
+                .foregroundStyle(metric == .devtime ? Color.purple : Color.primary)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, minHeight: 38)
+        .background(.white.opacity(hovered ? 0.08 : 0.045),
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .help("@\(entry.login) · \(metric.label): \(metric.format(entry.value))")
     }
 }
 

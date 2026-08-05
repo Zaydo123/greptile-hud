@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = PRStore()
+    let vibecoders = VibecodersStore()
     private let updater = UpdateController()
 
     private var panel: NSPanel!
@@ -13,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var escMonitor: Any?
     private var refreshTimer: Timer?
     private var updateCheckTimer: Timer?
+    private var vibecodersTimer: Timer?
 
     private var rightShiftDown = false
     private var pinned = false
@@ -24,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         promptAccessibilityIfNeeded()
 
         Task { await store.refresh() }
+        Task { await vibecoders.refresh() }
         Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             await updater.checkForUpdates(userInitiated: false)
@@ -33,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { await self?.store.refresh() }
+        }
+        vibecodersTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.vibecoders.heartbeatIfActive()
+            Task { await self?.vibecoders.refresh() }
         }
     }
 
@@ -46,25 +53,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
+        menu.delegate = self
+        statusItem.menu = menu
+        populateMenu(menu)
+    }
+
+    // MARK: Menu (rebuilt on open so leaderboard/online stay fresh)
+
+    private func populateMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
         let show = NSMenuItem(title: "Show HUD (pinned)", action: #selector(togglePinned), keyEquivalent: "")
         let refresh = NSMenuItem(title: "Refresh now", action: #selector(refreshNow), keyEquivalent: "r")
         let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        [show, refresh, updates].forEach { $0.target = self }
+        menu.addItem(show)
+        menu.addItem(refresh)
+        menu.addItem(updates)
+
+        menu.addItem(.separator())
+        addVibecodersMenu(menu)
+        menu.addItem(.separator())
+
         let hint = NSMenuItem(title: "Tip: hold Right Shift to peek", action: nil, keyEquivalent: "")
         hint.isEnabled = false
         let access = NSMenuItem(title: "Grant Accessibility Access…", action: #selector(openAccessibility), keyEquivalent: "")
         let quit = NSMenuItem(title: "Quit Greptile HUD", action: #selector(quitApp), keyEquivalent: "q")
-        [show, refresh, updates, access, quit].forEach { $0.target = self }
-
-        menu.addItem(show)
-        menu.addItem(refresh)
-        menu.addItem(updates)
-        menu.addItem(.separator())
+        [access, quit].forEach { $0.target = self }
         menu.addItem(hint)
         menu.addItem(.separator())
         menu.addItem(access)
         menu.addItem(quit)
-        statusItem.menu = menu
     }
+
+    private func addVibecodersMenu(_ menu: NSMenu) {
+        let header = NSMenuItem(title: "Vibecoders", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+
+        if !vibecoders.isSignedIn {
+            let login = NSMenuItem(title: "Sign in with GitHub…", action: #selector(vibecodersSignIn), keyEquivalent: "")
+            login.target = self
+            menu.addItem(login)
+            return
+        }
+
+        let who = NSMenuItem(title: "Signed in as @\(vibecoders.login)", action: nil, keyEquivalent: "")
+        who.isEnabled = false
+        menu.addItem(who)
+        let today = NSMenuItem(title: "Devtime today: \(vcDuration(vibecoders.devtimeToday))", action: nil, keyEquivalent: "")
+        today.isEnabled = false
+        menu.addItem(today)
+
+        if !vibecoders.online.isEmpty {
+            menu.addItem(.separator())
+            let onl = NSMenuItem(title: "Online now", action: nil, keyEquivalent: "")
+            onl.isEnabled = false
+            menu.addItem(onl)
+            for u in vibecoders.online.prefix(6) {
+                let item = NSMenuItem(title: "● \(u.name ?? u.login) — \(vcDuration(u.devtimeToday))", action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
+            }
+        }
+
+        let lb = NSMenuItem(title: "Leaderboard", action: nil, keyEquivalent: "")
+        let lbMenu = NSMenu()
+        for m in VCMetric.allCases {
+            let sub = NSMenuItem(title: m.label, action: nil, keyEquivalent: "")
+            let subMenu = NSMenu()
+            for e in vibecoders.leaderboard(for: m).prefix(8) {
+                let item = NSMenuItem(title: "\(e.rank).  \(e.name ?? e.login)  \(m.format(e.value))",
+                                      action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                subMenu.addItem(item)
+            }
+            sub.submenu = subMenu
+            lbMenu.addItem(sub)
+        }
+        lb.submenu = lbMenu
+        menu.addItem(lb)
+
+        let refreshVC = NSMenuItem(title: "Refresh vibecoders", action: #selector(vibecodersRefresh), keyEquivalent: "")
+        let syncVC = NSMenuItem(title: "Sync GitHub stats now", action: #selector(vibecodersSync), keyEquivalent: "")
+        let out = NSMenuItem(title: "Sign out", action: #selector(vibecodersSignOut), keyEquivalent: "")
+        [refreshVC, syncVC, out].forEach { $0.target = self }
+        menu.addItem(refreshVC)
+        menu.addItem(syncVC)
+        menu.addItem(out)
+    }
+
+    @objc private func vibecodersSignIn() { vibecoders.signIn() }
+    @objc private func vibecodersRefresh() { Task { await vibecoders.refresh() } }
+    @objc private func vibecodersSync() { vibecoders.syncNow() }
+    @objc private func vibecodersSignOut() { vibecoders.signOut() }
 
     // MARK: Overlay panel
 
@@ -85,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.contentMinSize = NSSize(width: HUDMetrics.panelWidth, height: HUDMetrics.panelHeight)
         p.contentMaxSize = p.contentMinSize
 
-        let host = NSHostingView(rootView: HUDView(store: store, onClose: { [weak self] in
+        let host = NSHostingView(rootView: HUDView(store: store, vibecoders: vibecoders, onClose: { [weak self] in
             self?.pinned = false
             self?.hideOverlay(force: true)
         }))
@@ -197,6 +278,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         a.addButton(withTitle: "Open Settings")
         a.addButton(withTitle: "Later")
         if a.runModal() == .alertFirstButtonReturn { openAccessibility() }
+    }
+
+    // MARK: Deep link (greptilehud://) — completes OAuth if the session window was closed early
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first, url.scheme == VibecodersStore.callbackScheme else { return }
+        vibecoders.completeOAuth(url: url)
+    }
+}
+
+// MARK: - Menu rebuild on open (fresh leaderboard/online state)
+
+extension AppDelegate: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        populateMenu(menu)
     }
 }
 

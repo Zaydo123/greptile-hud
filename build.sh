@@ -20,6 +20,7 @@ SOURCES=(
     "$ROOT/Sources/Models.swift"
     "$ROOT/Sources/GitHub.swift"
     "$ROOT/Sources/Updater.swift"
+    "$ROOT/Sources/Vibecoders.swift"
     "$ROOT/Sources/HUDView.swift"
     "$ROOT/Sources/main.swift"
 )
@@ -28,7 +29,7 @@ echo "==> Compiling universal app (macOS 13+)"
 for ARCH in arm64 x86_64; do
     swiftc -O -swift-version 5 \
         -target "$ARCH-apple-macos13.0" -sdk "$SDK" \
-        -framework AppKit -framework SwiftUI \
+        -framework AppKit -framework SwiftUI -framework AuthenticationServices \
         -o "$BUILD_DIR/GreptileHUD-$ARCH" \
         "${SOURCES[@]}"
 done

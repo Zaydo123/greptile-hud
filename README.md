@@ -71,6 +71,26 @@ filtered out, so it's only the work you set off.
 open GreptileHUD.app
 ```
 
+## Vibecoders (the social layer)
+
+The **Crew tab** in the HUD overlay (and a section in the menu-bar menu) is the
+vibecoders integration with the `backend/` service:
+
+- **Sign in with GitHub** — OAuth through the backend; the returned token is
+  kept in UserDefaults and the OAuth callback uses the registered
+  `greptilehud://` URL scheme.
+- **Online now** — who's been active in the last 5 minutes, with today's
+  devtime.
+- **Leaderboard** — devtime, commits, lines added, and merged PRs (last 30
+  days), refreshed every minute.
+- **Devtime tracking** — while Cursor, VS Code, iTerm2, Terminal, Ghostty, etc.
+  are running, the app sends a heartbeat every 60s so the backend accrues
+  devtime (this replaces the standalone `backend/client/devtime.sh` agent if
+  you run the HUD app).
+
+Menu-bar: Vibecoders ▸ Sign in, Online now, Leaderboard (per metric), Refresh,
+Sync GitHub stats now, Sign out.
+
 ## Updates and releases
 
 Greptile HUD checks GitHub Releases shortly after launch and every six hours
