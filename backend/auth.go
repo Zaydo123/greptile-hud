@@ -14,22 +14,66 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const sessionCookie = "vc_session"
-const stateCookie = "vc_oauth_state"
 const sessionMaxAge = 30 * 24 * time.Hour
 
+// OAuth state is validated server-side (single-use, 10-minute expiry) rather
+// than with a cookie: the ASWebAuthenticationSession browser context used by
+// the macOS app does not reliably preserve cookies across the GitHub redirect.
+// A single instance holds the map; Render free runs one instance, so this is
+// safe. If the process restarts mid-flow, the state is simply invalid and the
+// user retries.
 type auth struct {
 	clientID     string
 	clientSecret string
 	redirectURL  string // empty = derive from request
 	secret       []byte
+
+	stateMu sync.Mutex
+	states  map[string]time.Time
 }
 
 func newAuth(clientID, clientSecret, redirectURL, sessionSecret string) *auth {
-	return &auth{clientID: clientID, clientSecret: clientSecret, redirectURL: redirectURL, secret: []byte(sessionSecret)}
+	return &auth{
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		redirectURL:  redirectURL,
+		secret:       []byte(sessionSecret),
+		states:       map[string]time.Time{},
+	}
+}
+
+func (a *auth) newState() (string, error) {
+	state, err := randomHex(16)
+	if err != nil {
+		return "", err
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	now := time.Now()
+	for s, exp := range a.states {
+		if now.After(exp) {
+			delete(a.states, s)
+		}
+	}
+	a.states[state] = now.Add(10 * time.Minute)
+	return state, nil
+}
+
+// validState consumes the state: true exactly once within 10 minutes.
+func (a *auth) validState(state string) bool {
+	if state == "" {
+		return false
+	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	exp, ok := a.states[state]
+	delete(a.states, state)
+	return ok && time.Now().Before(exp)
 }
 
 func (a *auth) sign(payload []byte) string {
@@ -91,19 +135,11 @@ func (a *auth) callbackURL(r *http.Request) string {
 
 // handleLogin redirects to GitHub OAuth.
 func (a *auth) handleLogin(w http.ResponseWriter, r *http.Request) {
-	state, err := randomHex(16)
+	state, err := a.newState()
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "could not start login")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     stateCookie,
-		Value:    state,
-		Path:     "/",
-		MaxAge:   600,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
 	q := url.Values{}
 	q.Set("client_id", a.clientID)
 	q.Set("redirect_uri", a.callbackURL(r))
@@ -115,7 +151,7 @@ func (a *auth) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	a := s.auth
 	q := r.URL.Query()
-	if c, err := r.Cookie(stateCookie); err != nil || c.Value != q.Get("state") {
+	if !a.validState(q.Get("state")) {
 		httpError(w, http.StatusBadRequest, "invalid OAuth state")
 		return
 	}
@@ -168,7 +204,6 @@ func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, cookie)
-	http.SetCookie(w, &http.Cookie{Name: stateCookie, Value: "", Path: "/", MaxAge: -1})
 
 	// The Greptile HUD app is the frontend: hand it an API token via its
 	// registered URL scheme instead of a browser redirect.
