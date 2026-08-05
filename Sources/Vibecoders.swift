@@ -14,6 +14,14 @@ struct VCUser: Codable, Equatable {
     var orgs: [String]?   // backend can emit null when the org list is empty
     var lastSeen: Date?
     var lastSyncAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, login, name, orgs
+        case githubId = "github_id"
+        case avatarUrl = "avatar_url"
+        case lastSeen = "last_seen"
+        case lastSyncAt = "last_sync_at"
+    }
 }
 
 struct VCStats: Codable, Equatable {
@@ -23,6 +31,17 @@ struct VCStats: Codable, Equatable {
     var locAll: Int64 = 0
     var prs30d: Int64 = 0
     var prsAll: Int64 = 0
+
+    // Explicit keys: the snake-case decoder strategy silently fails on
+    // digit-containing keys like "commits_30d".
+    enum CodingKeys: String, CodingKey {
+        case commits30d = "commits_30d"
+        case commitsAll = "commits_all"
+        case loc30d = "loc_30d"
+        case locAll = "loc_all"
+        case prs30d = "prs_30d"
+        case prsAll = "prs_all"
+    }
 }
 
 struct VCOnlineUser: Codable, Equatable {
@@ -31,6 +50,13 @@ struct VCOnlineUser: Codable, Equatable {
     var avatarUrl: String?
     var lastSeen: Date?
     var devtimeToday: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case login, name
+        case avatarUrl = "avatar_url"
+        case lastSeen = "last_seen"
+        case devtimeToday = "devtime_today"
+    }
 }
 
 struct VCLeaderboardEntry: Codable, Equatable {
@@ -41,6 +67,12 @@ struct VCLeaderboardEntry: Codable, Equatable {
     var value: Int64
     var online: Bool
     var lastSeen: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case rank, login, name, value, online
+        case avatarUrl = "avatar_url"
+        case lastSeen = "last_seen"
+    }
 }
 
 enum VCMetric: String, CaseIterable {
@@ -285,10 +317,21 @@ final class VibecodersStore: NSObject, ObservableObject, ASWebAuthenticationPres
 
     // MARK: Networking
 
-    private struct MeResp: Decodable { var user: VCUser; var stats: VCStats; var devtimeToday: Int64 }
+    private struct MeResp: Decodable {
+        var user: VCUser
+        var stats: VCStats
+        var devtimeToday: Int64
+        enum CodingKeys: String, CodingKey {
+            case user, stats
+            case devtimeToday = "devtime_today"
+        }
+    }
     private struct OnlineResp: Decodable { var online: [VCOnlineUser] }
     private struct LeaderboardResp: Decodable { var entries: [VCLeaderboardEntry] }
-    private struct PulseResp: Decodable { var devtimeToday: Int64 }
+    private struct PulseResp: Decodable {
+        var devtimeToday: Int64
+        enum CodingKeys: String, CodingKey { case devtimeToday = "devtime_today" }
+    }
 
     private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
         var comps = URLComponents(url: Self.apiBaseURL, resolvingAgainstBaseURL: false)!
@@ -328,7 +371,8 @@ final class VibecodersStore: NSObject, ObservableObject, ASWebAuthenticationPres
 
 private func snakeDecoder() -> JSONDecoder {
     let dec = JSONDecoder()
-    dec.keyDecodingStrategy = .convertFromSnakeCase
+    // No keyDecodingStrategy: explicit CodingKeys everywhere (the snake-case
+    // strategy silently fails on digit-containing keys like "commits_30d").
     dec.dateDecodingStrategy = .custom { d in
         let s = try d.singleValueContainer().decode(String.self)
         let f = ISO8601DateFormatter()
