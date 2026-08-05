@@ -81,8 +81,8 @@ the token.
    (with a custom domain like `goathud.com`, use
    `https://goathud.com/auth/callback` and set `GITHUB_REDIRECT_URL` to match)
 3. In Render: **New → Blueprint**, select the repo. The root `render.yaml`
-   provisions the Go service, a free Postgres instance, and the landing page
-   (`site/`) in one connect.
+   provisions the Go service (Docker image from `backend/Dockerfile`), a free
+   Postgres instance, and the landing page (`site/`) in one connect.
 4. Fill in `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` (and optionally
    `GITHUB_ORGS`) in the backend service's environment.
 

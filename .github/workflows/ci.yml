@@ -53,6 +53,9 @@ jobs:
           go vet ./...
           go build ./...
 
+      - name: Build Docker image
+        run: docker build -t greptilehud-backend-check .
+
   landing:
     runs-on: ubuntu-latest
     steps:

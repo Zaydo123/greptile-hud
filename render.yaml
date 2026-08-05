@@ -13,10 +13,9 @@
 services:
   - type: web
     name: greptile-hud-backend
-    runtime: go
+    runtime: docker
     rootDir: backend
-    buildCommand: go build -o server .
-    startCommand: ./server
+    dockerfilePath: Dockerfile
     healthCheckPath: /api/health
     plan: free
     envVars:
