@@ -86,7 +86,7 @@ func upsertUser(ctx context.Context, db *sql.DB, u *User, accessToken string) (*
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (github_id) DO UPDATE SET
 			login = EXCLUDED.login,
-			name = EXCLUDED.name,
+			name = CASE WHEN EXCLUDED.name IS NULL THEN users.name ELSE EXCLUDED.name END,
 			avatar_url = EXCLUDED.avatar_url,
 			access_token = EXCLUDED.access_token,
 			orgs = EXCLUDED.orgs,
@@ -94,6 +94,16 @@ func upsertUser(ctx context.Context, db *sql.DB, u *User, accessToken string) (*
 		RETURNING `+userCols,
 		u.GitHubID, u.Login, nullIfEmpty(u.Name), nullIfEmpty(u.AvatarURL), accessToken, marshalOrgs(u.Orgs))
 	return scanUser(row)
+}
+
+func updateUserProfile(ctx context.Context, db *sql.DB, userID int64, name, avatarURL string) error {
+	_, err := db.ExecContext(ctx, `
+		UPDATE users SET
+			name = CASE WHEN $2 <> '' THEN $2 ELSE name END,
+			avatar_url = CASE WHEN $3 <> '' THEN $3 ELSE avatar_url END,
+			updated_at = now()
+		WHERE id = $1`, userID, name, avatarURL)
+	return err
 }
 
 func touchUser(ctx context.Context, db *sql.DB, id int64) error {

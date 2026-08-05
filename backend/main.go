@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
@@ -143,7 +144,11 @@ func (s *server) handleSync(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
-	go s.syncs.syncUser(r.Context(), user)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		s.syncs.syncUser(ctx, user)
+	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"ok":           true,
 		"sync_started": true,

@@ -326,8 +326,10 @@ final class PRStore: ObservableObject {
 
     private var inFlight = false
 
-    func refresh() async {
+    func refresh(force: Bool = false) async {
         if inFlight { return }
+        // Cooldown so rapid overlay shows don't trip the GitHub search API rate limit.
+        if !force, let last = lastRefresh, Date().timeIntervalSince(last) < 30 { return }
         inFlight = true; refreshing = true; errorText = nil
         defer { inFlight = false; refreshing = false }
 

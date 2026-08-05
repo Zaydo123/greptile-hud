@@ -124,6 +124,14 @@ func vcCount(_ n: Int64) -> String {
     return "\(n)"
 }
 
+/// The backend emits `""` (not null) when a user has no GitHub display name;
+/// treat nil and whitespace-only names as absent so UI falls back to the login.
+func vcDisplayName(_ name: String?) -> String? {
+    guard let name else { return nil }
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+}
+
 // MARK: - Store
 
 @MainActor

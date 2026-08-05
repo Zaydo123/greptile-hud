@@ -110,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onl.isEnabled = false
             menu.addItem(onl)
             for u in vibecoders.online.prefix(6) {
-                let item = NSMenuItem(title: "● \(u.name ?? u.login) — \(vcDuration(u.devtimeToday))", action: nil, keyEquivalent: "")
+                let item = NSMenuItem(title: "● \(vcDisplayName(u.name) ?? u.login) — \(vcDuration(u.devtimeToday))", action: nil, keyEquivalent: "")
                 item.isEnabled = false
                 menu.addItem(item)
             }
@@ -122,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let sub = NSMenuItem(title: m.label, action: nil, keyEquivalent: "")
             let subMenu = NSMenu()
             for e in vibecoders.leaderboard(for: m).prefix(8) {
-                let item = NSMenuItem(title: "\(e.rank).  \(e.name ?? e.login)  \(m.format(e.value))",
+                let item = NSMenuItem(title: "\(e.rank).  \(vcDisplayName(e.name) ?? e.login)  \(m.format(e.value))",
                                       action: nil, keyEquivalent: "")
                 item.isEnabled = false
                 subMenu.addItem(item)
@@ -250,7 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func refreshNow() { Task { await store.refresh() } }
+    @objc private func refreshNow() { Task { await store.refresh(force: true) } }
 
     @objc private func checkForUpdates() {
         Task { await updater.checkForUpdates(userInitiated: true) }

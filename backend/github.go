@@ -236,10 +236,27 @@ func (g *ghClient) repoCommitHistory(ctx context.Context, owner, repo string, ma
 
 // ---- PR counts via search ----
 
+var (
+	searchMu   sync.Mutex
+	lastSearch time.Time
+)
+
+// paceSearch enforces a minimum 2s gap between GitHub search API calls, globally
+// across concurrent syncs, to stay under the 30/min search rate limit.
+func (g *ghClient) paceSearch() {
+	searchMu.Lock()
+	defer searchMu.Unlock()
+	if d := 2*time.Second - time.Since(lastSearch); d > 0 {
+		time.Sleep(d)
+	}
+	lastSearch = time.Now()
+}
+
 func (g *ghClient) mergedPRCount(ctx context.Context, org, login string, since time.Time) (int64, error) {
+	g.paceSearch()
 	q := fmt.Sprintf("org:%s is:pr author:%s is:merged", org, login)
 	if !since.IsZero() {
-		q += " merged:>" + since.Format("2006-01-02")
+		q += " merged:>=" + since.Format("2006-01-02")
 	}
 	var out struct {
 		TotalCount int64 `json:"total_count"`
@@ -302,6 +319,17 @@ func (m *syncManager) syncUser(ctx context.Context, u *User) {
 
 	logf("sync: starting for %s", u.Login)
 	gh := newGHClient(accessToken)
+	var me struct {
+		ID        int64  `json:"id"`
+		Login     string `json:"login"`
+		Name      string `json:"name"`
+		AvatarURL string `json:"avatar_url"`
+	}
+	if err := gh.doJSON(ctx, http.MethodGet, "/user", nil, nil, &me); err != nil {
+		logf("sync: %s: fetch profile: %v", u.Login, err)
+	} else if err := updateUserProfile(ctx, m.db, u.ID, me.Name, me.AvatarURL); err != nil {
+		logf("sync: %s: save profile: %v", u.Login, err)
+	}
 	orgs, err := gh.getOrgs(ctx)
 	if err != nil {
 		logf("sync: %s: get orgs: %v", u.Login, err)
@@ -345,6 +373,7 @@ func (m *syncManager) syncUser(ctx context.Context, u *User) {
 		}
 	}
 
+	var computedAny bool
 	for _, p := range pairs {
 		org, repo := p[0], p[1]
 		err := gh.repoCommitHistory(ctx, org, repo, syncMaxCommitsPerRepo, func(c gqlCommit) bool {
@@ -361,21 +390,30 @@ func (m *syncManager) syncUser(ctx context.Context, u *User) {
 		})
 		if err != nil {
 			logf("sync: %s: history for %s/%s: %v", u.Login, org, repo, err)
+			continue
 		}
+		computedAny = true
 	}
 
-	for _, p := range pairs {
-		org, repo := p[0], p[1]
+	for _, org := range orgs {
 		if all, err := gh.mergedPRCount(ctx, org, u.Login, time.Time{}); err == nil {
 			st.PRsAll += all
+			computedAny = true
 		} else {
-			logf("sync: %s: pr count for %s/%s: %v", u.Login, org, repo, err)
+			logf("sync: %s: pr count for %s: %v", u.Login, org, err)
 		}
 		if recent, err := gh.mergedPRCount(ctx, org, u.Login, since); err == nil {
 			st.PRs30D += recent
+			computedAny = true
+		} else {
+			logf("sync: %s: pr count 30d for %s: %v", u.Login, org, err)
 		}
 	}
 
+	if !computedAny {
+		logf("sync: %s: no data computed, skipping stats save", u.Login)
+		return
+	}
 	if err := saveStats(ctx, m.db, u.ID, st); err != nil {
 		logf("sync: %s: save stats: %v", u.Login, err)
 		return

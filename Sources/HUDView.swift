@@ -137,7 +137,7 @@ struct HUDView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
             }
-            Button { Task { await store.refresh() } } label: {
+            Button { Task { await store.refresh(force: true) } } label: {
                 Group {
                     if store.refreshing { Spinner(size: 12, color: .secondary) }
                     else { Image(systemName: "arrow.clockwise") }
@@ -211,7 +211,7 @@ struct HUDView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Show \(label.lowercased()) pull requests")
+        .help("Show \(label.lowercased())")
     }
 
     @ViewBuilder private var openContent: some View {
@@ -354,7 +354,8 @@ struct HUDView: View {
                 AsyncImage(url: u) { img in
                     img.resizable().scaledToFill()
                 } placeholder: {
-                    Image(systemName: "person.crop.circle.fill").foregroundStyle(.secondary)
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 16)).foregroundStyle(.secondary)
                 }
                 .frame(width: 30, height: 30)
                 .clipShape(Circle())
@@ -363,9 +364,12 @@ struct HUDView: View {
                     .font(.system(size: 30)).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text("@\(vibecoders.login)").font(.system(size: 13, weight: .bold))
-                if let name = vibecoders.user?.name {
-                    Text(name).font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(vibecoders.login.isEmpty ? "" : "@\(vibecoders.login)")
+                    .font(.system(size: 13, weight: .bold))
+                if let name = vcDisplayName(vibecoders.user?.name) {
+                    Text(name)
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
                 }
             }
             Spacer(minLength: 8)
@@ -430,16 +434,23 @@ struct HUDView: View {
                                     AsyncImage(url: uu) { img in
                                         img.resizable().scaledToFill()
                                     } placeholder: {
-                                        Image(systemName: "person.crop.circle.fill").foregroundStyle(.secondary)
+                                        Image(systemName: "person.crop.circle.fill")
+                                            .font(.system(size: 12)).foregroundStyle(.secondary)
                                     }
                                     .frame(width: 20, height: 20).clipShape(Circle())
+                                } else {
+                                    Image(systemName: "person.crop.circle.fill")
+                                        .font(.system(size: 12)).foregroundStyle(.secondary)
                                 }
-                                Text(u.name ?? u.login).font(.system(size: 12, weight: .semibold))
+                                Text(vcDisplayName(u.name) ?? u.login)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .lineLimit(1).truncationMode(.tail)
                                 Text(vcDuration(u.devtimeToday))
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(.secondary).monospacedDigit()
                             }
                             .padding(.horizontal, 10).padding(.vertical, 6)
+                            .frame(minHeight: 32)
                             .background(.white.opacity(0.05),
                                         in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                         }
@@ -831,7 +842,7 @@ struct CrewRow: View {
                 Image(systemName: "person.crop.circle.fill")
                     .font(.system(size: 24)).foregroundStyle(.secondary)
             }
-            Text(entry.name ?? entry.login)
+            Text(vcDisplayName(entry.name) ?? entry.login)
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
             if entry.online {
@@ -845,7 +856,7 @@ struct CrewRow: View {
                 .foregroundStyle(metric == .devtime ? Color.purple : Color.primary)
         }
         .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 38)
+        .frame(maxWidth: .infinity, minHeight: 40)
         .background(.white.opacity(hovered ? 0.08 : 0.045),
                     in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .contentShape(Rectangle())

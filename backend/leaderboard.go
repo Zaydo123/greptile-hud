@@ -59,7 +59,12 @@ func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 			logf("leaderboard scan: %v", err)
 			continue
 		}
-		e.Name, e.Rank = name.String, rank+1
+		if name.Valid && name.String != "" {
+			e.Name = name.String
+		} else {
+			e.Name = e.Login
+		}
+		e.Rank = rank + 1
 		e.Online = isOnline(&User{LastSeen: e.LastSeen})
 		out = append(out, e)
 		rank++
@@ -114,7 +119,11 @@ func (s *server) handleOnline(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&e.Login, &name, &e.Avatar, &e.LastSeen, &e.DevtimeToday); err != nil {
 			continue
 		}
-		e.Name = name.String
+		if name.Valid && name.String != "" {
+			e.Name = name.String
+		} else {
+			e.Name = e.Login
+		}
 		out = append(out, e)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"online": out})
