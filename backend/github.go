@@ -260,6 +260,9 @@ func parseOrgs(s string) []string {
 }
 
 func marshalOrgs(orgs []string) string {
+	if orgs == nil {
+		orgs = []string{}
+	}
 	b, _ := json.Marshal(orgs)
 	return string(b)
 }

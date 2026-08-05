@@ -11,7 +11,7 @@ struct VCUser: Codable, Equatable {
     var login: String
     var name: String?
     var avatarUrl: String?
-    var orgs: [String]
+    var orgs: [String]?   // backend can emit null when the org list is empty
     var lastSeen: Date?
     var lastSyncAt: Date?
 }
