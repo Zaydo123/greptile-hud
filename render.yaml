@@ -1,0 +1,53 @@
+# Render blueprint: deploys the whole Greptile HUD stack.
+#
+# Connect this repo in Render ("New" -> "Blueprint"), and it provisions:
+#   - the Go backend ("vibecoders" API)
+#   - the landing page (static site, goathud.com)
+#   - a Postgres database
+#
+# After the first deploy, set GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET in the
+# backend service environment (GitHub OAuth app -> https://github.com/settings/developers).
+# If you use a custom domain, also set GITHUB_REDIRECT_URL to
+# https://<your-domain>/auth/callback.
+
+services:
+  - type: web
+    name: greptile-hud-backend
+    runtime: go
+    rootDir: backend
+    buildCommand: go build -o server .
+    startCommand: ./server
+    healthCheckPath: /api/health
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: greptile-hud-db
+          property: connectionString
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: GITHUB_REDIRECT_URL
+        sync: false
+      - key: OAUTH_REDIRECT_SCHEME
+        value: greptilehud
+      - key: GITHUB_ORGS
+        sync: false
+
+  - type: web
+    name: greptile-hud-landing
+    runtime: static
+    staticPublishPath: ./site
+    plan: free
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+databases:
+  - name: greptile-hud-db
+    databaseName: vibecoders
+    plan: free

@@ -2,6 +2,20 @@
 
 A hold-to-peek macOS control center for all your open PRs' Greptile reviews.
 
+The repo also contains `backend/`: a Go + Postgres service ("vibecoders") that
+tracks devtime and GitHub activity leaderboards for the crew, deployed on
+Render. See `backend/README.md` for setup and API docs.
+
+## Landing page and hosting
+
+- `site/` — a static landing page (the funny one) with a download button that
+  always points at the latest GitHub Release via
+  `releases/latest/download/GreptileHUD.zip`. Point `goathud.com` at its Render
+  URL (or use the default `*.onrender.com`).
+- `render.yaml` — a Render Blueprint that deploys the whole stack in one
+  "connect repo" step: the Go backend, the landing page, and Postgres.
+  See `backend/README.md` for the GitHub OAuth app setup it expects.
+
 **Hold Right Shift** → a translucent overlay appears showing every open PR you
 authored, with its latest Greptile **Confidence Score**, whether it's **currently
 re-reviewing** (👀), and **how long** it's been reviewing. Release Right Shift to

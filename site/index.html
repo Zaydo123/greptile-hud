@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Greptile HUD — hold right shift, judge your PRs faster</title>
+  <meta name="description" content="A hold-to-peek macOS control center for all your open PRs' Greptile reviews. Free, open source, vibecoder-approved.">
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --panel: #12161f;
+      --border: #242b3a;
+      --text: #e6e9f0;
+      --dim: #8b93a7;
+      --accent: #7c5cff;
+      --accent-2: #22d3ee;
+      --good: #34d399;
+      --gold: #fbbf24;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.6 -apple-system, "SF Mono", ui-monospace, Menlo, monospace;
+      background-image:
+        radial-gradient(1000px 500px at 20% -10%, rgba(124, 92, 255, .14), transparent 60%),
+        radial-gradient(800px 400px at 90% 10%, rgba(34, 211, 238, .08), transparent 60%);
+    }
+    nav {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 16px 28px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: rgba(11,14,20,.9); backdrop-filter: blur(8px);
+    }
+    nav .logo { font-weight: 700; letter-spacing: .5px; }
+    nav .logo span { color: var(--accent); }
+    nav a { color: var(--dim); text-decoration: none; margin-left: 18px; font-size: 14px; }
+    nav a:hover { color: var(--text); }
+
+    .hero { text-align: center; padding: 88px 20px 40px; max-width: 780px; margin: 0 auto; }
+    .badge {
+      display: inline-block; font-size: 13px; color: var(--accent-2);
+      border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px; margin-bottom: 22px;
+      background: rgba(34,211,238,.06);
+    }
+    .hero h1 { font-size: 44px; line-height: 1.15; margin: 0 0 18px; letter-spacing: -.5px; }
+    .hero h1 em { color: var(--accent-2); font-style: normal; }
+    .hero p.lead { color: var(--dim); font-size: 18px; max-width: 620px; margin: 0 auto 34px; }
+    .cta-row { display: flex; gap: 14px; justify-content: center; align-items: center; flex-wrap: wrap; }
+    .download {
+      background: var(--accent); color: #fff; border: 0; border-radius: 10px;
+      padding: 15px 30px; font: inherit; font-size: 17px; font-weight: 700;
+      text-decoration: none; box-shadow: 0 0 30px rgba(124,92,255,.35);
+    }
+    .download:hover { filter: brightness(1.12); }
+    .ghost {
+      background: var(--panel); color: var(--text); border: 1px solid var(--border);
+      border-radius: 10px; padding: 15px 24px; font: inherit; font-size: 15px; text-decoration: none;
+    }
+    .ghost:hover { border-color: var(--accent); }
+    .version { margin-top: 14px; color: var(--dim); font-size: 13px; }
+    .version code { color: var(--text); background: var(--panel); border: 1px solid var(--border); padding: 2px 8px; border-radius: 6px; }
+
+    section { max-width: 860px; margin: 0 auto; padding: 56px 20px; }
+    section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 3px; color: var(--dim); margin: 0 0 26px; text-align: center; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+      padding: 22px; transition: transform .15s ease, border-color .15s ease;
+    }
+    .card:hover { transform: translateY(-3px); border-color: var(--accent); }
+    .card .icon { font-size: 26px; margin-bottom: 10px; }
+    .card h3 { margin: 0 0 8px; font-size: 16px; }
+    .card p { margin: 0; color: var(--dim); font-size: 14px; }
+
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; counter-reset: step; }
+    .step { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+    .step::before {
+      counter-increment: step; content: "0" counter(step);
+      color: var(--accent); font-weight: 700; font-size: 13px; letter-spacing: 2px;
+    }
+    .step h3 { margin: 10px 0 8px; font-size: 16px; }
+    .step p { margin: 0; color: var(--dim); font-size: 14px; }
+    .step kbd {
+      background: var(--panel); border: 1px solid var(--border); border-bottom-width: 3px;
+      border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 13px; color: var(--text);
+    }
+
+    details { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; padding: 16px 20px; }
+    summary { cursor: pointer; font-weight: 600; }
+    details p { color: var(--dim); margin: 12px 0 0; font-size: 14px; }
+
+    .teaser {
+      text-align: center; border: 1px dashed var(--accent); border-radius: 16px;
+      padding: 40px 20px; background: rgba(124,92,255,.05);
+    }
+    .teaser h3 { margin: 0 0 10px; font-size: 22px; }
+    .teaser p { color: var(--dim); margin: 0 auto 18px; max-width: 520px; }
+    .teaser .soon { color: var(--gold); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; }
+
+    footer { border-top: 1px solid var(--border); text-align: center; padding: 36px 20px 60px; color: var(--dim); font-size: 13px; }
+    footer a { color: var(--accent-2); text-decoration: none; }
+    footer .jokes { max-width: 620px; margin: 0 auto 14px; }
+
+    @media (max-width: 600px) { .hero h1 { font-size: 32px; } }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">⬢ Greptile<span>HUD</span></div>
+  <div>
+    <a href="#how">how it works</a>
+    <a href="#faq">faq</a>
+    <a href="https://github.com/Zaydo123/greptile-hud">github</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <span class="badge">✨ free forever · open source · vibecoder-approved</span>
+  <h1>Your PRs are having a meeting.<br>You're not <em>invited</em>.</h1>
+  <p class="lead">
+    Greptile HUD is a hold-to-peek macOS control center that shows you every open PR's
+    Greptile confidence score, live review status, and your own CI runs — without leaving
+    your keyboard. Hold <strong>Right Shift</strong>, get the tea.
+  </p>
+  <div class="cta-row">
+    <a class="download" href="https://github.com/Zaydo123/greptile-hud/releases/latest/download/GreptileHUD.zip">
+      ⬇ Download for macOS
+    </a>
+    <a class="ghost" href="https://github.com/Zaydo123/greptile-hud/releases">all releases</a>
+  </div>
+  <p class="version" id="version-line">
+    <span id="version-placeholder">checking for latest release…</span>
+  </p>
+</header>
+
+<section id="features">
+  <h2>what you get</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="icon">🎯</div>
+      <h3>Confidence scores</h3>
+      <p>Every PR's Greptile score at a glance — green, yellow, orange, or red. The same colors your designer uses when they see your CSS.</p>
+    </div>
+    <div class="card">
+      <div class="icon">👀</div>
+      <h3>Live re-review timer</h3>
+      <p>See when Greptile is re-reviewing and for how long, in real time. It's like watching paint dry, but with more CI bills.</p>
+    </div>
+    <div class="card">
+      <div class="icon">⚡</div>
+      <h3>Your Actions column</h3>
+      <p>Every CI run you kicked off — running, failed, or success — sorted to the top. Accountability has never been this convenient.</p>
+    </div>
+    <div class="card">
+      <div class="icon">🔑</div>
+      <h3>No tokens to paste</h3>
+      <p>Uses your existing <code>gh</code> CLI auth. If you don't have <code>gh</code>, it will also accept one (1) mildly embarrassed apology.</p>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <h2>how it works</h2>
+  <div class="steps">
+    <div class="step">
+      <h3>Hold <kbd>Right Shift</kbd></h3>
+      <p>Anywhere. In iTerm, in Cursor, mid-argument with your teammate. The overlay appears wherever your mouse is.</p>
+    </div>
+    <div class="step">
+      <h3>Peek at the chaos</h3>
+      <p>PRs sorted by who's actively being reviewed, with scores, review counts, and your CI runs on the side.</p>
+    </div>
+    <div class="step">
+      <h3>Release, breathe</h3>
+      <p>Let go to hide. Click to open a PR, or hit ↻ to re-trigger a review like the tiny chaos gremlin you are.</p>
+    </div>
+  </div>
+</section>
+
+<section id="vibecoders">
+  <div class="teaser">
+    <span class="soon">soon™</span>
+    <h3>vibecoders: the social layer</h3>
+    <p>
+      We're building a devtime leaderboard so you can finally know, with scientific rigor,
+      who vibes hardest. Commits, lines added, PRs merged, and hours with an editor open.
+      Because nothing says "community" like a public ranking of your insecurities.
+    </p>
+    <p class="dim" style="font-size:13px;">sneak peek: it's probably you. it's always you.</p>
+  </div>
+</section>
+
+<section id="faq">
+  <h2>faq</h2>
+  <details open>
+    <summary>Does it spy on me?</summary>
+    <p>Only mildly. It reads your open PRs through your existing <code>gh</code> login and judges them silently. Technically that's less surveillance than your code reviewer does.</p>
+  </details>
+  <details>
+    <summary>Why Right Shift specifically?</summary>
+    <p>Left Shift was already taken — by caps lock pretending to be a shift key. Right Shift had nothing better to do.</p>
+  </details>
+  <details>
+    <summary>Does it work on Linux / Windows?</summary>
+    <p>No, and we're deeply sorry. On those platforms it compiles to a single tear rolling down your terminal emulator's cheek.</p>
+  </details>
+  <details>
+    <summary>Is it free? What's the catch?</summary>
+    <p>Free, open source, no account, no telemetry. The catch is you'll finally have to look at your own CI failures instead of blaming the flaky test.</p>
+  </details>
+  <details>
+    <summary>How do I update?</summary>
+    <p>It checks GitHub Releases itself and can install updates with one click — SHA-256 verified, signature checked, swap safe. We did the boring part so you can keep vibing.</p>
+  </details>
+</section>
+
+<footer>
+  <div class="jokes">
+    Made with 💜 and questionable commit hygiene by <a href="https://github.com/Zaydo123">Zaydo123</a>.
+    No NFTs were minted during the development of this app. Not for lack of trying.
+    <br><br>
+    <a href="https://github.com/Zaydo123/greptile-hud">source code</a> ·
+    <a href="https://github.com/Zaydo123/greptile-hud/releases">releases</a> ·
+    <a href="https://github.com/Zaydo123/greptile-hud/issues">file a complaint (issues)</a>
+  </div>
+  <div>© 2026 · built by a vibe coder, for vibe coders · <span id="year"></span></div>
+</footer>
+
+<script>
+  (function () {
+    document.getElementById("year").textContent = new Date().getFullYear();
+    fetch("https://api.github.com/repos/Zaydo123/greptile-hud/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+      .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+      .then(function (rel) {
+        var line = document.getElementById("version-line");
+        line.innerHTML = "latest release: <code>" + rel.tag_name + "</code> · " +
+          new Date(rel.published_at).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) +
+          " · universal (Apple Silicon + Intel) · macOS 13+ · " +
+          '<a href="https://github.com/Zaydo123/greptile-hud/releases/latest/download/GreptileHUD.zip.sha256">checksum</a>';
+      })
+      .catch(function () {
+        var line = document.getElementById("version-line");
+        line.innerHTML = '<a href="https://github.com/Zaydo123/greptile-hud/releases">see all releases</a>';
+      });
+  })();
+</script>
+</body>
+</html>

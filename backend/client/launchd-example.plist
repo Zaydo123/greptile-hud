@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Example launchd agent for the devtime heartbeat script.
+
+  Install:
+    cp client/launchd-example.plist ~/Library/LaunchAgents/com.greptilehud.devtime.plist
+    launchctl load ~/Library/LaunchAgents/com.greptilehud.devtime.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.greptilehud.devtime.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.greptilehud.devtime</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/YOU/Desktop/git/GreptileHUD/backend/client/devtime.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>VC_API_URL</key>
+        <string>https://your-app.onrender.com</string>
+        <key>VC_API_TOKEN</key>
+        <string>PASTE_YOUR_TOKEN</string>
+        <key>VC_INTERVAL</key>
+        <string>60</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/greptilehud-devtime.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/greptilehud-devtime.log</string>
+</dict>
+</plist>

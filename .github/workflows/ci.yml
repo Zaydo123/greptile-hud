@@ -34,3 +34,49 @@ jobs:
           lipo GreptileHUD.app/Contents/MacOS/GreptileHUD -verify_arch x86_64 arm64
           test "$(vtool -show-build GreptileHUD.app/Contents/MacOS/GreptileHUD | grep -c 'minos 13.0')" -eq 2
           git diff --check
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Lint and build
+        run: |
+          gofmt -l . | (! grep .)
+          go vet ./...
+          go build ./...
+
+  landing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check landing page
+        run: |
+          test -f site/index.html
+          grep -q "releases/latest/download/GreptileHUD.zip" site/index.html
+          grep -q "releases/latest/download/GreptileHUD.zip.sha256" site/index.html
+          grep -q "api.github.com/repos/Zaydo123/greptile-hud/releases/latest" site/index.html
+          ruby -e "require 'yaml'; YAML.load_file('site/../render.yaml'); puts 'render.yaml parses'"
+
+      - name: Check Render blueprint covers everything
+        run: |
+          ruby -e '
+            require "yaml"
+            spec = YAML.load_file("render.yaml")
+            names = spec["services"].map { |s| s["name"] }
+            abort "backend missing" unless names.include?("greptile-hud-backend")
+            abort "landing missing" unless names.include?("greptile-hud-landing")
+            abort "db missing" unless spec["databases"]&.any? { |d| d["name"] == "greptile-hud-db" }
+            landing = spec["services"].find { |s| s["name"] == "greptile-hud-landing" }
+            abort "not static" unless landing["staticPublishPath"] == "./site"
+            abort "bad health check" unless spec["services"].find { |s| s["name"] == "greptile-hud-backend" }["healthCheckPath"] == "/api/health"
+            puts "blueprint OK"
+          '

@@ -2,5 +2,9 @@
 GreptileHUD.app/
 *.app
 
+# Backend build output
+backend/server
+
 # macOS
 .DS_Store
+backend/backend
