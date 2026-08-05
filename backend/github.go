@@ -164,13 +164,15 @@ func (g *ghClient) repoCommitHistory(ctx context.Context, owner, repo string, ma
 	cursor := ""
 	fetched := 0
 	for {
+		variables := map[string]string{"owner": owner, "name": repo}
+		// GitHub rejects an explicit empty cursor ("... does not appear to be a
+		// valid cursor"), so omit it until we have a real page cursor.
+		if cursor != "" {
+			variables["cursor"] = cursor
+		}
 		payload := map[string]any{
-			"query": commitHistoryQuery,
-			"variables": map[string]string{
-				"owner":  owner,
-				"name":   repo,
-				"cursor": cursor,
-			},
+			"query":     commitHistoryQuery,
+			"variables": variables,
 		}
 		body, err := json.Marshal(payload)
 		if err != nil {
