@@ -1,0 +1,12 @@
+# Keep the Docker build context small: only backend/ is needed.
+.git
+GreptileHUD.app/
+site/
+scripts/
+Sources/
+.github/
+*.md
+Info.plist
+build.sh
+render.yaml
+.DS_Store

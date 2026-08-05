@@ -17,7 +17,6 @@ services:
   - type: web
     name: greptile-hud
     runtime: docker
-    rootDir: backend
     dockerfilePath: Dockerfile
     healthCheckPath: /api/health
     plan: free

@@ -88,7 +88,9 @@ the repo:
 
 The blueprint generates `SESSION_SECRET`, wires `DATABASE_URL` to the
 Postgres instance, sets the OAuth redirect URL, and enables the `/api/health`
-check automatically.
+check automatically. The Dockerfile deliberately lives at the repo root
+because Render builds this service from the repository root (it ignores
+`rootDir` for Docker build contexts).
 
 ## Devtime agent on your Mac
 
@@ -96,7 +98,7 @@ The agent is a shell script that heartbeats while a dev app runs. Get a token
 from the app (`/api/me`), then:
 
 ```bash
-VC_API_URL=https://greptile-hud-backend.onrender.com \
+VC_API_URL=https://greptile-hud.onrender.com \
 VC_API_TOKEN=<your token> \
 ./client/devtime.sh
 ```
