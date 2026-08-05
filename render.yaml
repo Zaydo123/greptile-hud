@@ -1,18 +1,21 @@
 # Render blueprint: deploys the whole Greptile HUD stack.
 #
 # Connect this repo in Render ("New" -> "Blueprint"), and it provisions:
-#   - the Go backend ("vibecoders" API)
-#   - the landing page (static site, goathud.com)
+#   - the backend API at https://greptile-hud.onrender.com (service name pinned)
+#   - the landing page at https://greptile-hud-landing.onrender.com
 #   - a Postgres database
 #
-# After the first deploy, set GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET in the
-# backend service environment (GitHub OAuth app -> https://github.com/settings/developers).
-# If you use a custom domain, also set GITHUB_REDIRECT_URL to
-# https://<your-domain>/auth/callback.
+# To get from "connect" to "live", only two manual steps remain:
+#   1. Delete the old hand-made "greptile-hud" service in Render if it exists
+#      (the blueprint takes over that name so the URL stays the same).
+#   2. Paste GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET into the backend service
+#      environment (they are secrets and cannot live in the repo). Register
+#      the same values in the GitHub OAuth app with callback:
+#      https://greptile-hud.onrender.com/auth/callback
 
 services:
   - type: web
-    name: greptile-hud-backend
+    name: greptile-hud
     runtime: docker
     rootDir: backend
     dockerfilePath: Dockerfile
@@ -30,7 +33,7 @@ services:
       - key: SESSION_SECRET
         generateValue: true
       - key: GITHUB_REDIRECT_URL
-        sync: false
+        value: https://greptile-hud.onrender.com/auth/callback
       - key: OAUTH_REDIRECT_SCHEME
         value: greptilehud
       - key: GITHUB_ORGS

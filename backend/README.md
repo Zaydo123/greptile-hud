@@ -74,17 +74,21 @@ the token.
 
 ## Deploying on Render
 
-1. Push this repo to GitHub (required for Blueprint + OAuth).
-2. Create a GitHub OAuth app with:
-   - Homepage URL: `https://greptile-hud-backend.onrender.com`
-   - Callback URL: `https://greptile-hud-backend.onrender.com/auth/callback`
-   (with a custom domain like `goathud.com`, use
-   `https://goathud.com/auth/callback` and set `GITHUB_REDIRECT_URL` to match)
-3. In Render: **New → Blueprint**, select the repo. The root `render.yaml`
-   provisions the Go service (Docker image from `backend/Dockerfile`), a free
-   Postgres instance, and the landing page (`site/`) in one connect.
-4. Fill in `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` (and optionally
-   `GITHUB_ORGS`) in the backend service's environment.
+The root `render.yaml` blueprint deploys everything (backend at
+`https://greptile-hud.onrender.com`, landing page, Postgres) in one connect.
+Only two steps are manual, because they involve secrets that cannot live in
+the repo:
+
+1. Create a GitHub OAuth app (github.com/settings/developers) with callback
+   URL `https://greptile-hud.onrender.com/auth/callback`.
+2. In Render: **New → Blueprint** → select the repo. If an old hand-made
+   `greptile-hud` service exists, delete it first so the blueprint can take
+   over the name (and URL). After the first deploy, paste `GITHUB_CLIENT_ID`
+   and `GITHUB_CLIENT_SECRET` into the backend service's Environment tab.
+
+The blueprint generates `SESSION_SECRET`, wires `DATABASE_URL` to the
+Postgres instance, sets the OAuth redirect URL, and enables the `/api/health`
+check automatically.
 
 ## Devtime agent on your Mac
 

@@ -75,11 +75,15 @@ jobs:
             require "yaml"
             spec = YAML.load_file("render.yaml")
             names = spec["services"].map { |s| s["name"] }
-            abort "backend missing" unless names.include?("greptile-hud-backend")
+            abort "backend missing" unless names.include?("greptile-hud")
             abort "landing missing" unless names.include?("greptile-hud-landing")
             abort "db missing" unless spec["databases"]&.any? { |d| d["name"] == "greptile-hud-db" }
             landing = spec["services"].find { |s| s["name"] == "greptile-hud-landing" }
             abort "not static" unless landing["staticPublishPath"] == "./site"
-            abort "bad health check" unless spec["services"].find { |s| s["name"] == "greptile-hud-backend" }["healthCheckPath"] == "/api/health"
+            backend = spec["services"].find { |s| s["name"] == "greptile-hud" }
+            abort "bad health check" unless backend["healthCheckPath"] == "/api/health"
+            abort "no db env var" unless backend["envVars"].any? { |e| e["fromDatabase"]&.dig("name") == "greptile-hud-db" }
+            redirect = backend["envVars"].find { |e| e["key"] == "GITHUB_REDIRECT_URL" }
+            abort "redirect URL drift" unless redirect && redirect["value"] == "https://greptile-hud.onrender.com/auth/callback"
             puts "blueprint OK"
           '
