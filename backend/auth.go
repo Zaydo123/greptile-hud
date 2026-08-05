@@ -72,14 +72,21 @@ func (a *auth) userIDFromCookie(r *http.Request) (int64, bool) {
 }
 
 func (a *auth) redirectBase(r *http.Request) string {
-	if a.redirectURL != "" {
-		return a.redirectURL
-	}
 	scheme := "https"
 	if strings.HasPrefix(r.Host, "localhost") && r.Header.Get("X-Forwarded-Proto") != "https" {
 		scheme = "http"
 	}
 	return scheme + "://" + r.Host
+}
+
+// callbackURL is the exact OAuth redirect URI: the full URL from
+// GITHUB_REDIRECT_URL if set, otherwise derived from the request host.
+// It must be identical in the authorize and token-exchange steps.
+func (a *auth) callbackURL(r *http.Request) string {
+	if a.redirectURL != "" {
+		return a.redirectURL
+	}
+	return a.redirectBase(r) + "/auth/callback"
 }
 
 // handleLogin redirects to GitHub OAuth.
@@ -99,7 +106,7 @@ func (a *auth) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 	q := url.Values{}
 	q.Set("client_id", a.clientID)
-	q.Set("redirect_uri", a.redirectBase(r)+"/auth/callback")
+	q.Set("redirect_uri", a.callbackURL(r))
 	q.Set("scope", "read:org repo")
 	q.Set("state", state)
 	http.Redirect(w, r, githubAuthURL+"?"+q.Encode(), http.StatusFound)
@@ -122,7 +129,7 @@ func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := a.exchangeCode(r.Context(), code, a.redirectBase(r)+"/auth/callback")
+	token, err := a.exchangeCode(r.Context(), code, a.callbackURL(r))
 	if err != nil {
 		httpError(w, http.StatusBadGateway, "token exchange failed: "+err.Error())
 		return
