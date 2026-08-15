@@ -24,9 +24,9 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>VC_API_URL</key>
-        <string>https://your-app.onrender.com</string>
-        <key>VC_API_TOKEN</key>
-        <string>PASTE_YOUR_TOKEN</string>
+        <string>https://greptile-hud.onrender.com</string>
+        <key>VC_USER</key>
+        <string>YOUR_USERNAME</string>
         <key>VC_INTERVAL</key>
         <string>60</string>
     </dict>

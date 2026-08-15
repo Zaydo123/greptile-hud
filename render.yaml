@@ -5,13 +5,8 @@
 #     https://greptile-hud.onrender.com (service name pinned)
 #   - a Postgres database
 #
-# To get from "connect" to "live", only two manual steps remain:
-#   1. Delete the old hand-made "greptile-hud" service in Render if it exists
-#      (the blueprint takes over that name so the URL stays the same).
-#   2. Paste GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET into the backend service
-#      environment (they are secrets and cannot live in the repo). Register
-#      the same values in the GitHub OAuth app with callback:
-#      https://greptile-hud.onrender.com/auth/callback
+# No secrets are needed: identity is trust-based (users pick a username), so
+# there are no OAuth client credentials or session secrets to paste.
 #
 # Custom domain (goathud.com): add it under the service's
 # Settings -> Custom Domains (DNS is already a CNAME to
@@ -29,18 +24,6 @@ services:
         fromDatabase:
           name: greptile-hud-db
           property: connectionString
-      - key: GITHUB_CLIENT_ID
-        sync: false
-      - key: GITHUB_CLIENT_SECRET
-        sync: false
-      - key: SESSION_SECRET
-        generateValue: true
-      - key: GITHUB_REDIRECT_URL
-        value: https://greptile-hud.onrender.com/auth/callback
-      - key: OAUTH_REDIRECT_SCHEME
-        value: greptilehud
-      - key: GITHUB_ORGS
-        sync: false
 
 databases:
   - name: greptile-hud-db

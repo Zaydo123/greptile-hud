@@ -90,14 +90,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         header.isEnabled = false
         menu.addItem(header)
 
-        if !vibecoders.isSignedIn {
-            let login = NSMenuItem(title: "Sign in with GitHub…", action: #selector(vibecodersSignIn), keyEquivalent: "")
-            login.target = self
-            menu.addItem(login)
+        if !vibecoders.hasUsername {
+            let join = NSMenuItem(title: "Join the devtime leaderboard…", action: #selector(vibecodersSetUsername), keyEquivalent: "")
+            join.target = self
+            menu.addItem(join)
             return
         }
 
-        let who = NSMenuItem(title: "Signed in as @\(vibecoders.login)", action: nil, keyEquivalent: "")
+        let who = NSMenuItem(title: "Crew as @\(vibecoders.username)", action: nil, keyEquivalent: "")
         who.isEnabled = false
         menu.addItem(who)
         let today = NSMenuItem(title: "Devtime today: \(vcDuration(vibecoders.devtimeToday))", action: nil, keyEquivalent: "")
@@ -118,34 +118,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let lb = NSMenuItem(title: "Leaderboard", action: nil, keyEquivalent: "")
         let lbMenu = NSMenu()
-        for m in VCMetric.allCases {
-            let sub = NSMenuItem(title: m.label, action: nil, keyEquivalent: "")
-            let subMenu = NSMenu()
-            for e in vibecoders.leaderboard(for: m).prefix(8) {
-                let item = NSMenuItem(title: "\(e.rank).  \(vcDisplayName(e.name) ?? e.login)  \(m.format(e.value))",
-                                      action: nil, keyEquivalent: "")
-                item.isEnabled = false
-                subMenu.addItem(item)
-            }
-            sub.submenu = subMenu
-            lbMenu.addItem(sub)
+        for e in vibecoders.board.prefix(8) {
+            let item = NSMenuItem(title: "\(e.rank).  \(vcDisplayName(e.name) ?? e.login)  \(vcDuration(e.value))",
+                                  action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            lbMenu.addItem(item)
         }
         lb.submenu = lbMenu
         menu.addItem(lb)
 
         let refreshVC = NSMenuItem(title: "Refresh vibecoders", action: #selector(vibecodersRefresh), keyEquivalent: "")
-        let syncVC = NSMenuItem(title: "Sync GitHub stats now", action: #selector(vibecodersSync), keyEquivalent: "")
-        let out = NSMenuItem(title: "Sign out", action: #selector(vibecodersSignOut), keyEquivalent: "")
-        [refreshVC, syncVC, out].forEach { $0.target = self }
+        let change = NSMenuItem(title: "Change username…", action: #selector(vibecodersSetUsername), keyEquivalent: "")
+        let out = NSMenuItem(title: "Forget username", action: #selector(vibecodersForget), keyEquivalent: "")
+        [refreshVC, change, out].forEach { $0.target = self }
         menu.addItem(refreshVC)
-        menu.addItem(syncVC)
+        menu.addItem(change)
         menu.addItem(out)
     }
 
-    @objc private func vibecodersSignIn() { vibecoders.signIn() }
+    @objc private func vibecodersSetUsername() {
+        let alert = NSAlert()
+        alert.messageText = "Vibecoders username"
+        alert.informativeText = "Pick the name shown on the devtime leaderboard. No GitHub account, no tokens, no tracking — we take your word for it."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.placeholderString = "username"
+        field.stringValue = vibecoders.username
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            vibecoders.setUsername(field.stringValue)
+        }
+    }
+
     @objc private func vibecodersRefresh() { Task { await vibecoders.refresh() } }
-    @objc private func vibecodersSync() { vibecoders.syncNow() }
-    @objc private func vibecodersSignOut() { vibecoders.signOut() }
+    @objc private func vibecodersForget() { vibecoders.clearUsername() }
 
     // MARK: Overlay panel
 
@@ -278,13 +286,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         a.addButton(withTitle: "Open Settings")
         a.addButton(withTitle: "Later")
         if a.runModal() == .alertFirstButtonReturn { openAccessibility() }
-    }
-
-    // MARK: Deep link (greptilehud://) — completes OAuth if the session window was closed early
-
-    func application(_ application: NSApplication, open urls: [URL]) {
-        guard let url = urls.first, url.scheme == VibecodersStore.callbackScheme else { return }
-        vibecoders.completeOAuth(url: url)
     }
 }
 

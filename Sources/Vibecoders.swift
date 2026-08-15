@@ -1,5 +1,4 @@
 import AppKit
-import AuthenticationServices
 import Combine
 import Foundation
 
@@ -7,53 +6,24 @@ import Foundation
 
 struct VCUser: Codable, Equatable {
     var id: Int64
-    var githubId: Int64
     var login: String
     var name: String?
-    var avatarUrl: String?
-    var orgs: [String]?   // backend can emit null when the org list is empty
     var lastSeen: Date?
-    var lastSyncAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, login, name, orgs
-        case githubId = "github_id"
-        case avatarUrl = "avatar_url"
+        case id, login, name
         case lastSeen = "last_seen"
-        case lastSyncAt = "last_sync_at"
-    }
-}
-
-struct VCStats: Codable, Equatable {
-    var commits30d: Int64 = 0
-    var commitsAll: Int64 = 0
-    var loc30d: Int64 = 0
-    var locAll: Int64 = 0
-    var prs30d: Int64 = 0
-    var prsAll: Int64 = 0
-
-    // Explicit keys: the snake-case decoder strategy silently fails on
-    // digit-containing keys like "commits_30d".
-    enum CodingKeys: String, CodingKey {
-        case commits30d = "commits_30d"
-        case commitsAll = "commits_all"
-        case loc30d = "loc_30d"
-        case locAll = "loc_all"
-        case prs30d = "prs_30d"
-        case prsAll = "prs_all"
     }
 }
 
 struct VCOnlineUser: Codable, Equatable {
     var login: String
     var name: String?
-    var avatarUrl: String?
     var lastSeen: Date?
     var devtimeToday: Int64
 
     enum CodingKeys: String, CodingKey {
         case login, name
-        case avatarUrl = "avatar_url"
         case lastSeen = "last_seen"
         case devtimeToday = "devtime_today"
     }
@@ -63,47 +33,25 @@ struct VCLeaderboardEntry: Codable, Equatable {
     var rank: Int
     var login: String
     var name: String?
-    var avatarUrl: String?
     var value: Int64
     var online: Bool
     var lastSeen: Date?
 
     enum CodingKeys: String, CodingKey {
         case rank, login, name, value, online
-        case avatarUrl = "avatar_url"
         case lastSeen = "last_seen"
     }
 }
 
-enum VCMetric: String, CaseIterable {
-    case devtime, commits, loc, prs
-
-    var label: String {
-        switch self {
-        case .devtime: return "Devtime"
-        case .commits: return "Commits"
-        case .loc: return "Lines"
-        case .prs: return "PRs"
-        }
-    }
-
-    func format(_ value: Int64) -> String {
-        switch self {
-        case .devtime: return vcDuration(value)
-        default: return vcCount(value)
-        }
-    }
-}
-
 enum VCError: Error {
-    case unauthorized
+    case notFound
     case failed(String)
 }
 
 func vcFriendly(_ error: Error) -> String {
     if let e = error as? VCError {
         switch e {
-        case .unauthorized: return "Not signed in anymore"
+        case .notFound: return "Not on the leaderboard yet — open an editor to start banking devtime"
         case .failed(let msg): return msg
         }
     }
@@ -118,14 +66,8 @@ func vcDuration(_ seconds: Int64) -> String {
     return "\(s)s"
 }
 
-func vcCount(_ n: Int64) -> String {
-    if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-    if n >= 1_000 { return String(format: "%.1fk", Double(n) / 1_000) }
-    return "\(n)"
-}
-
-/// The backend emits `""` (not null) when a user has no GitHub display name;
-/// treat nil and whitespace-only names as absent so UI falls back to the login.
+/// The backend emits `""` (not null) when a user has no display name; treat
+/// nil and whitespace-only names as absent so UI falls back to the login.
 func vcDisplayName(_ name: String?) -> String? {
     guard let name else { return nil }
     let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -135,160 +77,76 @@ func vcDisplayName(_ name: String?) -> String? {
 // MARK: - Store
 
 @MainActor
-final class VibecodersStore: NSObject, ObservableObject, ASWebAuthenticationPresentationContextProviding {
+final class VibecodersStore: NSObject, ObservableObject {
     static let apiBaseURL = URL(string: "https://greptile-hud.onrender.com")!
-    static let callbackScheme = "greptilehud"
 
     @Published private(set) var user: VCUser?
-    @Published private(set) var stats = VCStats()
     @Published private(set) var online: [VCOnlineUser] = []
-    @Published private(set) var boards: [VCMetric: [VCLeaderboardEntry]] = [:]
-    @Published var selectedMetric: VCMetric = .devtime
+    @Published private(set) var board: [VCLeaderboardEntry] = []
     @Published private(set) var devtimeToday: Int64 = 0
-    @Published private(set) var syncing = false
     @Published private(set) var lastRefresh: Date?
     @Published var errorText: String?
 
-    private var session: ASWebAuthenticationSession?
+    private static let usernameKey = "vibecoders.username"
 
-    /// macOS 13+ requires a presentation anchor; menu-bar apps have no window,
-    /// so the OAuth sheet anchors to this invisible 1×1 window.
-    private lazy var anchorWindow: NSWindow = {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1),
-                         styleMask: [.borderless], backing: .buffered, defer: false)
-        w.isOpaque = false
-        w.backgroundColor = .clear
-        w.hasShadow = false
-        w.ignoresMouseEvents = true
-        w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        return w
-    }()
+    var username: String { UserDefaults.standard.string(forKey: Self.usernameKey) ?? "" }
+    var hasUsername: Bool { !username.isEmpty }
 
-    private static let tokenKey = "vibecoders.token"
-    private static let loginKey = "vibecoders.login"
+    // MARK: Identity — trust-based, the user just picks a name
 
-    var isSignedIn: Bool { user != nil }
-
-    var login: String { user?.login ?? UserDefaults.standard.string(forKey: Self.loginKey) ?? "" }
-
-    private var token: String? {
-        get { UserDefaults.standard.string(forKey: Self.tokenKey) }
-        set { UserDefaults.standard.set(newValue, forKey: Self.tokenKey) }
+    static func normalizeUsername(_ raw: String) -> String? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while s.hasPrefix("@") { s.removeFirst() }
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty, s.count <= 32 else { return nil }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        guard s.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+        guard let first = s.first, first.isLetter || first.isNumber else { return nil }
+        return s
     }
 
-    func leaderboard(for metric: VCMetric) -> [VCLeaderboardEntry] {
-        boards[metric] ?? []
-    }
-
-    // MARK: Auth
-
-    func signIn() {
-        guard session == nil else { return }
-        let url = Self.apiBaseURL.appendingPathComponent("auth/login")
-        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: Self.callbackScheme) { [weak self] url, error in
-            Task { @MainActor in
-                guard let self else { return }
-                self.session = nil
-                self.anchorWindow.orderOut(nil)
-                if let error {
-                    let nserr = error as NSError
-                    if nserr.code != ASWebAuthenticationSessionError.canceledLogin.rawValue {
-                        self.errorText = "Sign-in failed: \(error.localizedDescription)"
-                    }
-                    return
-                }
-                if let url { self.completeOAuth(url: url) }
-            }
-        }
-        session.prefersEphemeralWebBrowserSession = false
-        session.presentationContextProvider = self
-        self.session = session
-        _ = session.start()
-    }
-
-    // MARK: ASWebAuthenticationPresentationContextProviding
-
-    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        MainActor.assumeIsolated {
-            if let screen = NSScreen.main {
-                let f = screen.frame
-                anchorWindow.setFrameOrigin(NSPoint(x: f.midX, y: f.midY))
-            }
-            anchorWindow.orderFrontRegardless()
-            return anchorWindow
-        }
-    }
-
-    /// Handles `greptilehud://oauth/callback?token=…&login=…` (also used for
-    /// deep links arriving via application(_:open:) if the OAuth window was
-    /// dismissed first).
-    func completeOAuth(url: URL) {
-        let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        let token = comps?.queryItems?.first { $0.name == "token" }?.value
-        let login = comps?.queryItems?.first { $0.name == "login" }?.value
-        guard let token, !token.isEmpty else {
-            errorText = "Sign-in returned no token"
+    func setUsername(_ raw: String) {
+        guard let cleaned = Self.normalizeUsername(raw) else {
+            errorText = "Pick a username: letters, numbers, - and _ (max 32 characters)"
             return
         }
-        self.token = token
-        if let login { UserDefaults.standard.set(login, forKey: Self.loginKey) }
+        UserDefaults.standard.set(cleaned, forKey: Self.usernameKey)
+        user = nil
+        online = []
+        board = []
+        devtimeToday = 0
         errorText = nil
         Task { await refresh() }
     }
 
-    func signOut() {
-        let t = token
-        token = nil
-        UserDefaults.standard.removeObject(forKey: Self.loginKey)
+    func clearUsername() {
+        UserDefaults.standard.removeObject(forKey: Self.usernameKey)
         user = nil
         online = []
-        boards = [:]
+        board = []
         devtimeToday = 0
-        syncing = false
         errorText = nil
-        if let t {
-            Task { _ = try? await Self.revokeToken(t) }
-        }
     }
 
     // MARK: Refresh
 
     func refresh() async {
-        guard token != nil else { return }
+        guard hasUsername else { return }
         do {
-            let me: MeResp = try await get("/api/me")
+            let me: UserResp = try await get("/api/user", query: [URLQueryItem(name: "login", value: username)])
             user = me.user
-            stats = me.stats
             devtimeToday = me.devtimeToday
             let onl: OnlineResp = try await get("/api/online")
             online = onl.online
-            for m in VCMetric.allCases {
-                let lb: LeaderboardResp = try await get("/api/leaderboard",
-                                                        query: [URLQueryItem(name: "metric", value: m.rawValue),
-                                                                URLQueryItem(name: "period", value: "30d")])
-                boards[m] = lb.entries
-            }
+            let lb: LeaderboardResp = try await get("/api/leaderboard",
+                                                    query: [URLQueryItem(name: "period", value: "today")])
+            board = lb.entries
             lastRefresh = Date()
             errorText = nil
-        } catch VCError.unauthorized {
-            signOut()
+        } catch VCError.notFound {
+            // fresh name, nothing recorded yet — fine
         } catch {
             errorText = vcFriendly(error)
-        }
-    }
-
-    func syncNow() {
-        guard token != nil else { return }
-        syncing = true
-        Task {
-            defer { syncing = false }
-            do {
-                _ = try await post("/api/sync")
-            } catch {
-                errorText = vcFriendly(error)
-            }
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            await refresh()
         }
     }
 
@@ -308,29 +166,28 @@ final class VibecodersStore: NSObject, ObservableObject, ASWebAuthenticationPres
     /// Send a heartbeat while a dev app is running; the backend accrues devtime
     /// and marks us online. Stays quiet on failure (background check).
     func heartbeatIfActive() {
-        guard token != nil, let app = Self.runningDevApp() else { return }
+        guard hasUsername, let app = Self.runningDevApp() else { return }
         Task {
             do {
-                let body = try JSONEncoder().encode(["app": app])
+                let body = try JSONEncoder().encode(["user": username, "app": app])
                 let data = try await post("/api/pulse", json: body)
                 let dec = snakeDecoder()
                 if let resp = try? dec.decode(PulseResp.self, from: data) {
                     devtimeToday = resp.devtimeToday
                 }
             } catch {
-                // quiet: offline or not signed in
+                // quiet: offline
             }
         }
     }
 
     // MARK: Networking
 
-    private struct MeResp: Decodable {
+    private struct UserResp: Decodable {
         var user: VCUser
-        var stats: VCStats
         var devtimeToday: Int64
         enum CodingKeys: String, CodingKey {
-            case user, stats
+            case user
             case devtimeToday = "devtime_today"
         }
     }
@@ -345,11 +202,10 @@ final class VibecodersStore: NSObject, ObservableObject, ASWebAuthenticationPres
         var comps = URLComponents(url: Self.apiBaseURL, resolvingAgainstBaseURL: false)!
         comps.path = path
         if !query.isEmpty { comps.queryItems = query }
-        var req = URLRequest(url: comps.url!)
-        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        let req = URLRequest(url: comps.url!)
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 { throw VCError.unauthorized }
+        if status == 404 { throw VCError.notFound }
         guard (200..<300).contains(status) else { throw VCError.failed("HTTP \(status)") }
         return try snakeDecoder().decode(T.self, from: data)
     }
@@ -357,30 +213,20 @@ final class VibecodersStore: NSObject, ObservableObject, ASWebAuthenticationPres
     private func post(_ path: String, json: Data? = nil) async throws -> Data {
         var req = URLRequest(url: Self.apiBaseURL.appendingPathComponent(path))
         req.httpMethod = "POST"
-        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         if let json {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = json
         }
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 { throw VCError.unauthorized }
         guard (200..<300).contains(status) else { throw VCError.failed("HTTP \(status)") }
         return data
-    }
-
-    private static func revokeToken(_ token: String) async throws {
-        var req = URLRequest(url: apiBaseURL.appendingPathComponent("api/tokens/\(token)"))
-        req.httpMethod = "DELETE"
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        _ = try await URLSession.shared.data(for: req)
     }
 }
 
 private func snakeDecoder() -> JSONDecoder {
     let dec = JSONDecoder()
-    // No keyDecodingStrategy: explicit CodingKeys everywhere (the snake-case
-    // strategy silently fails on digit-containing keys like "commits_30d").
+    // No keyDecodingStrategy: explicit CodingKeys everywhere.
     dec.dateDecodingStrategy = .custom { d in
         let s = try d.singleValueContainer().decode(String.self)
         let f = ISO8601DateFormatter()

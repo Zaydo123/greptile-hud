@@ -33,142 +33,62 @@ func openDB(databaseURL string) (*sql.DB, error) {
 	return db, nil
 }
 
-// ---- users ----
+// ---- users (trust-based: a user is a self-chosen username) ----
 
 type User struct {
-	ID          int64      `json:"id"`
-	GitHubID    int64      `json:"github_id"`
-	Login       string     `json:"login"`
-	Name        string     `json:"name,omitempty"`
-	AvatarURL   string     `json:"avatar_url,omitempty"`
-	Orgs        []string   `json:"orgs"`
-	LastSeen    *time.Time `json:"last_seen"`
-	LastSyncAt  *time.Time `json:"last_sync_at"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	AccessToken string     `json:"-"`
+	ID        int64      `json:"id"`
+	Login     string     `json:"login"`
+	Name      string     `json:"name,omitempty"`
+	LastSeen  *time.Time `json:"last_seen"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var u User
-	var orgs string
-	var name, avatar sql.NullString
-	if err := row.Scan(&u.ID, &u.GitHubID, &u.Login, &name, &avatar, &orgs, &u.LastSeen, &u.LastSyncAt, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	var name sql.NullString
+	if err := row.Scan(&u.ID, &u.Login, &name, &u.LastSeen, &u.CreatedAt, &u.UpdatedAt); err != nil {
 		return nil, err
 	}
-	u.Name, u.AvatarURL = name.String, avatar.String
-	u.Orgs = parseOrgs(orgs)
+	u.Name = name.String
 	return &u, nil
 }
 
-const userCols = "id, github_id, login, name, avatar_url, orgs, last_seen, last_sync_at, created_at, updated_at"
+const userCols = "id, login, name, last_seen, created_at, updated_at"
 
-func getUserByID(ctx context.Context, db *sql.DB, id int64) (*User, error) {
-	u, err := scanUser(db.QueryRowContext(ctx, "SELECT "+userCols+" FROM users WHERE id = $1", id))
+// getUserByLogin finds a user by exact login first, then case-insensitively so
+// "Zayd" and "zayd" don't split into two people.
+func getUserByLogin(ctx context.Context, db *sql.DB, login string) (*User, error) {
+	u, err := scanUser(db.QueryRowContext(ctx, "SELECT "+userCols+" FROM users WHERE login = $1", login))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return u, err
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
-func getUserByGitHubID(ctx context.Context, db *sql.DB, ghID int64) (*User, error) {
-	u, err := scanUser(db.QueryRowContext(ctx, "SELECT "+userCols+" FROM users WHERE github_id = $1", ghID))
+// getOrCreateUser returns the user for a login, creating the row on first
+// sight. Anyone can claim any username — that's the trust model. Matches are
+// case-insensitive (see the users_login_lower_idx index), so a pulse with a
+// different casing merges into the existing row instead of creating a twin.
+func getOrCreateUser(ctx context.Context, db *sql.DB, login string) (*User, error) {
+	if u, err := getUserByLogin(ctx, db, login); err != nil || u != nil {
+		return u, err
+	}
+	u, err := scanUser(db.QueryRowContext(ctx,
+		"INSERT INTO users (login) VALUES ($1) ON CONFLICT DO NOTHING RETURNING "+userCols, login))
 	if err == sql.ErrNoRows {
-		return nil, nil
+		// Lost a race or the login already exists with different casing.
+		u, err = scanUser(db.QueryRowContext(ctx,
+			"SELECT "+userCols+" FROM users WHERE lower(login) = lower($1)", login))
 	}
 	return u, err
-}
-
-func upsertUser(ctx context.Context, db *sql.DB, u *User, accessToken string) (*User, error) {
-	u.UpdatedAt = time.Now().UTC()
-	row := db.QueryRowContext(ctx, `
-		INSERT INTO users (github_id, login, name, avatar_url, access_token, orgs)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (github_id) DO UPDATE SET
-			login = EXCLUDED.login,
-			name = CASE WHEN EXCLUDED.name IS NULL THEN users.name ELSE EXCLUDED.name END,
-			avatar_url = EXCLUDED.avatar_url,
-			access_token = EXCLUDED.access_token,
-			orgs = EXCLUDED.orgs,
-			updated_at = now()
-		RETURNING `+userCols,
-		u.GitHubID, u.Login, nullIfEmpty(u.Name), nullIfEmpty(u.AvatarURL), accessToken, marshalOrgs(u.Orgs))
-	return scanUser(row)
-}
-
-func updateUserProfile(ctx context.Context, db *sql.DB, userID int64, name, avatarURL string) error {
-	_, err := db.ExecContext(ctx, `
-		UPDATE users SET
-			name = CASE WHEN $2 <> '' THEN $2 ELSE name END,
-			avatar_url = CASE WHEN $3 <> '' THEN $3 ELSE avatar_url END,
-			updated_at = now()
-		WHERE id = $1`, userID, name, avatarURL)
-	return err
 }
 
 func touchUser(ctx context.Context, db *sql.DB, id int64) error {
 	_, err := db.ExecContext(ctx, "UPDATE users SET last_seen = now() WHERE id = $1", id)
-	return err
-}
-
-func setUserSyncTime(ctx context.Context, db *sql.DB, id int64) error {
-	_, err := db.ExecContext(ctx, "UPDATE users SET last_sync_at = now() WHERE id = $1", id)
-	return err
-}
-
-func allUsers(ctx context.Context, db *sql.DB) ([]*User, error) {
-	rows, err := db.QueryContext(ctx, "SELECT "+userCols+" FROM users ORDER BY login")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*User
-	for rows.Next() {
-		u, err := scanUser(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, u)
-	}
-	return out, rows.Err()
-}
-
-// ---- github_stats ----
-
-type Stats struct {
-	Commits30D int64 `json:"commits_30d"`
-	CommitsAll int64 `json:"commits_all"`
-	LOC30D     int64 `json:"loc_30d"`
-	LOCAll     int64 `json:"loc_all"`
-	PRs30D     int64 `json:"prs_30d"`
-	PRsAll     int64 `json:"prs_all"`
-}
-
-func getStats(ctx context.Context, db *sql.DB, userID int64) (Stats, error) {
-	var s Stats
-	err := db.QueryRowContext(ctx, `
-		SELECT commits_30d, commits_all, loc_30d, loc_all, prs_30d, prs_all
-		FROM github_stats WHERE user_id = $1`, userID).
-		Scan(&s.Commits30D, &s.CommitsAll, &s.LOC30D, &s.LOCAll, &s.PRs30D, &s.PRsAll)
-	if err == sql.ErrNoRows {
-		return Stats{}, nil
-	}
-	return s, err
-}
-
-func saveStats(ctx context.Context, db *sql.DB, userID int64, s Stats) error {
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO github_stats (user_id, commits_30d, commits_all, loc_30d, loc_all, prs_30d, prs_all)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (user_id) DO UPDATE SET
-			commits_30d = EXCLUDED.commits_30d,
-			commits_all = EXCLUDED.commits_all,
-			loc_30d = EXCLUDED.loc_30d,
-			loc_all = EXCLUDED.loc_all,
-			prs_30d = EXCLUDED.prs_30d,
-			prs_all = EXCLUDED.prs_all,
-			updated_at = now()`,
-		userID, s.Commits30D, s.CommitsAll, s.LOC30D, s.LOCAll, s.PRs30D, s.PRsAll)
 	return err
 }
 
@@ -225,54 +145,4 @@ func devtimeToday(ctx context.Context, db *sql.DB, userID int64) (int64, error) 
 		return 0, nil
 	}
 	return s.Int64, err
-}
-
-// ---- api_tokens ----
-
-func createToken(ctx context.Context, db *sql.DB, userID int64) (string, error) {
-	tok, err := randomHex(32)
-	if err != nil {
-		return "", err
-	}
-	if _, err := db.ExecContext(ctx,
-		"INSERT INTO api_tokens (token, user_id) VALUES ($1, $2)", tok, userID); err != nil {
-		return "", err
-	}
-	return tok, nil
-}
-
-func userByToken(ctx context.Context, db *sql.DB, token string) (*User, error) {
-	var userID int64
-	err := db.QueryRowContext(ctx,
-		"SELECT user_id FROM api_tokens WHERE token = $1", token).Scan(&userID)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return getUserByID(ctx, db, userID)
-}
-
-func tokensForUser(ctx context.Context, db *sql.DB, userID int64) ([]string, error) {
-	rows, err := db.QueryContext(ctx, "SELECT token FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC", userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var t string
-		if err := rows.Scan(&t); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
-}
-
-func deleteToken(ctx context.Context, db *sql.DB, userID int64, token string) error {
-	_, err := db.ExecContext(ctx,
-		"DELETE FROM api_tokens WHERE token = $1 AND user_id = $2", token, userID)
-	return err
 }
