@@ -102,7 +102,7 @@ final class VibecodersStore: NSObject, ObservableObject {
         let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
         guard s.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
         guard let first = s.first, first.isLetter || first.isNumber else { return nil }
-        return s
+        return s.lowercased()   // the backend matches case-insensitively anyway
     }
 
     func setUsername(_ raw: String) {

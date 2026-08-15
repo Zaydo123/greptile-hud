@@ -12,12 +12,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var escMonitor: Any?
+    private var localEscMonitor: Any?
     private var refreshTimer: Timer?
     private var updateCheckTimer: Timer?
     private var vibecodersTimer: Timer?
 
     private var rightShiftDown = false
     private var pinned = false
+    private var usernameFieldEditing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildStatusItem()
@@ -170,13 +172,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.isMovableByWindowBackground = false
         p.hidesOnDeactivate = false
         p.isFloatingPanel = true
+        p.becomesKeyOnlyIfNeeded = true   // let the username field take typing without stealing focus on every peek
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         p.contentMinSize = NSSize(width: HUDMetrics.panelWidth, height: HUDMetrics.panelHeight)
         p.contentMaxSize = p.contentMinSize
 
         let host = NSHostingView(rootView: HUDView(store: store, vibecoders: vibecoders, onClose: { [weak self] in
             self?.pinned = false
+            self?.usernameFieldEditing = false
             self?.hideOverlay(force: true)
+        }, onUsernameEditing: { [weak self] editing in
+            self?.usernameFieldEditing = editing
         }))
         host.autoresizingMask = [.width, .height]
         host.frame = p.contentView?.bounds ?? .zero
@@ -227,11 +233,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleFlags(e); return e
         }
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] e in
-            guard let self = self else { return }
-            if e.keyCode == 53, self.pinned {   // Esc closes a pinned HUD
+            guard let self else { return }
+            if e.keyCode == 53, self.pinned || self.usernameFieldEditing {   // Esc closes a pinned HUD (or while typing)
                 self.pinned = false
+                self.usernameFieldEditing = false
                 self.hideOverlay(force: true)
             }
+        }
+        // Global monitors don't fire for our own events; once the app is active
+        // (username typing) Esc must be caught here instead.
+        localEscMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] e in
+            guard let self else { return e }
+            if e.keyCode == 53, self.pinned || self.usernameFieldEditing {
+                self.pinned = false
+                self.usernameFieldEditing = false
+                self.hideOverlay(force: true)
+            }
+            return e
         }
     }
 
@@ -243,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showOverlay(pinned: false)
         } else if !down && rightShiftDown {
             rightShiftDown = false
-            hideOverlay()
+            if !usernameFieldEditing { hideOverlay() }   // don't vanish while the username field is focused
         }
     }
 

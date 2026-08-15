@@ -44,11 +44,16 @@ struct HUDView: View {
     @ObservedObject var store: PRStore
     @ObservedObject var vibecoders: VibecodersStore
     var onClose: () -> Void = {}
+    /// Fired when the username field gains/loses focus: the overlay is a
+    /// nonactivating panel, so the app must activate itself to take typing,
+    /// and the overlay must stay up while typing even if Right Shift releases.
+    var onUsernameEditing: (Bool) -> Void = { _ in }
 
     @State private var tab: Tab = .open
     @State private var showStale: Bool = false
     @State private var staleHovered: Bool = false
     @State private var usernameDraft = ""
+    @FocusState private var usernameFocused: Bool
     private enum Tab { case open, merged, crew }
 
     private static let staleThreshold: TimeInterval = 14 * 86400
@@ -322,6 +327,14 @@ struct HUDView: View {
                     .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .strokeBorder(.white.opacity(0.10)))
                     .frame(width: 220)
+                    .focused($usernameFocused)
+                    .onChange(of: usernameFocused) { focused in
+                        if focused {
+                            NSApp.activate(ignoringOtherApps: true)
+                        }
+                        onUsernameEditing(focused)
+                    }
+                    .onTapGesture { NSApp.activate(ignoringOtherApps: true) }
                     .onSubmit { vibecoders.setUsername(usernameDraft) }
                 Button {
                     vibecoders.setUsername(usernameDraft)
