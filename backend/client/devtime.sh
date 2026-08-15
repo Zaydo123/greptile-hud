@@ -6,18 +6,20 @@
 # as online.
 #
 # Usage:
-#   VC_API_URL=https://your-app.onrender.com VC_API_TOKEN=xxx ./devtime.sh
+#   VC_API_URL=https://your-app.onrender.com VC_USER=zayd ./devtime.sh
 #
 # Optional:
 #   VC_INTERVAL  seconds between checks (default 60)
 #   VC_APPS      comma-separated process names to watch (defaults below)
 #
 # Run it in the background or with launchd (see launchd-example.plist).
+#
+# There is no authentication: pick any username. We take your word for it.
 
 set -euo pipefail
 
 API_URL="${VC_API_URL:?VC_API_URL is required (e.g. https://app.onrender.com)}"
-TOKEN="${VC_API_TOKEN:?VC_API_TOKEN is required (get one from the app, see /api/me)}"
+USER="${VC_USER:?VC_USER is required (the username shown on the leaderboard)}"
 INTERVAL="${VC_INTERVAL:-60}"
 
 # Process names of dev apps worth counting. pgrep -x matches the exact name;
@@ -35,9 +37,8 @@ while true; do
 
   if [ -n "$running" ]; then
     if ! curl -s -o /dev/null -m 10 \
-        -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
-        -d "{\"app\":\"$running\"}" \
+        -d "{\"user\":\"$USER\",\"app\":\"$running\"}" \
         "$API_URL/api/pulse"; then
       echo "heartbeat failed for $running" >&2
     fi

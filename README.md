@@ -3,8 +3,8 @@
 A hold-to-peek macOS control center for all your open PRs' Greptile reviews.
 
 The repo also contains `backend/`: a Go + Postgres service ("vibecoders") that
-tracks devtime and GitHub activity leaderboards for the crew, deployed on
-Render. See `backend/README.md` for setup and API docs.
+tracks a devtime leaderboard for the crew, deployed on Render. See
+`backend/README.md` for setup and API docs.
 
 ## Landing page and hosting
 
@@ -76,20 +76,21 @@ open GreptileHUD.app
 The **Crew tab** in the HUD overlay (and a section in the menu-bar menu) is the
 vibecoders integration with the `backend/` service:
 
-- **Sign in with GitHub** — OAuth through the backend; the returned token is
-  kept in UserDefaults and the OAuth callback uses the registered
-  `greptilehud://` URL scheme.
+- **Pick a username** — no GitHub sign-in, no OAuth, no tokens. You choose the
+  name shown on the leaderboard and we take your word for it (there's no
+  authentication or code tracking at all; identity lives only in
+  UserDefaults, cleared by "Forget username").
 - **Online now** — who's been active in the last 5 minutes, with today's
   devtime.
-- **Leaderboard** — devtime, commits, lines added, and merged PRs (last 30
-  days), refreshed every minute.
+- **Leaderboard** — today's devtime, refreshed every minute.
 - **Devtime tracking** — while Cursor, VS Code, iTerm2, Terminal, Ghostty, etc.
   are running, the app sends a heartbeat every 60s so the backend accrues
   devtime (this replaces the standalone `backend/client/devtime.sh` agent if
-  you run the HUD app).
+  you run the HUD app). The heartbeat sends only your username, the app name,
+  and a timestamp — no code, no keystrokes, no repo data.
 
-Menu-bar: Vibecoders ▸ Sign in, Online now, Leaderboard (per metric), Refresh,
-Sync GitHub stats now, Sign out.
+Menu-bar: Vibecoders ▸ Join the devtime leaderboard, Online now, Leaderboard,
+Refresh, Change username, Forget username.
 
 ## Updates and releases
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
@@ -9,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -23,45 +21,26 @@ func logf(format string, args ...any) {
 }
 
 type config struct {
-	port           string
-	databaseURL    string
-	githubClientID string
-	githubSecret   string
-	redirectURL    string
-	sessionSecret  string
-	orgFilter      []string
+	port        string
+	databaseURL string
 }
 
 func loadConfig() config {
 	return config{
-		port:           envOr("PORT", "8080"),
-		databaseURL:    os.Getenv("DATABASE_URL"),
-		githubClientID: os.Getenv("GITHUB_CLIENT_ID"),
-		githubSecret:   os.Getenv("GITHUB_CLIENT_SECRET"),
-		redirectURL:    os.Getenv("GITHUB_REDIRECT_URL"),
-		sessionSecret:  os.Getenv("SESSION_SECRET"),
-		orgFilter:      splitCSV(os.Getenv("GITHUB_ORGS")),
+		port:        envOr("PORT", "8080"),
+		databaseURL: os.Getenv("DATABASE_URL"),
 	}
 }
 
 func (c config) validate() error {
-	switch {
-	case c.databaseURL == "":
+	if c.databaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
-	case c.githubClientID == "":
-		return fmt.Errorf("GITHUB_CLIENT_ID is required")
-	case c.githubSecret == "":
-		return fmt.Errorf("GITHUB_CLIENT_SECRET is required")
-	case c.sessionSecret == "":
-		return fmt.Errorf("SESSION_SECRET is required")
 	}
 	return nil
 }
 
 type server struct {
-	db    *sql.DB
-	auth  *auth
-	syncs *syncManager
+	db *sql.DB
 }
 
 func main() {
@@ -76,20 +55,9 @@ func main() {
 	}
 	defer db.Close()
 
-	s := &server{
-		db:    db,
-		auth:  newAuth(cfg.githubClientID, cfg.githubSecret, cfg.redirectURL, cfg.sessionSecret),
-		syncs: newSyncManager(db, cfg.orgFilter),
-	}
-
-	go s.syncs.runPeriodicSync(6 * time.Hour)
-	go s.syncs.syncAll() // refresh stats for existing users on boot
+	s := &server{db: db}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /auth/login", s.auth.handleLogin)
-	mux.HandleFunc("GET /auth/callback", s.handleCallback)
-	mux.HandleFunc("GET /auth/logout", s.auth.handleLogout)
-
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		if err := db.PingContext(r.Context()); err != nil {
 			httpError(w, http.StatusServiceUnavailable, "db unavailable")
@@ -97,15 +65,10 @@ func main() {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
-	mux.HandleFunc("GET /api/me", s.handleMe)
+	mux.HandleFunc("GET /api/user", s.handleUser)
 	mux.HandleFunc("GET /api/online", s.handleOnline)
 	mux.HandleFunc("GET /api/leaderboard", s.handleLeaderboard)
-	mux.HandleFunc("GET /api/profile/", s.handleProfile)
 	mux.HandleFunc("POST /api/pulse", s.handlePulse)
-	mux.HandleFunc("POST /api/sync", s.handleSync)
-	mux.HandleFunc("GET /api/tokens", s.handleListTokens)
-	mux.HandleFunc("POST /api/tokens", s.handleCreateToken)
-	mux.HandleFunc("DELETE /api/tokens/", s.handleDeleteToken)
 
 	// Landing page (site/), embedded into the binary so goathud.com serves the
 	// marketing site and the API from one service.
@@ -137,69 +100,6 @@ func logRequests(next http.Handler) http.Handler {
 	})
 }
 
-// handleSync triggers a background GitHub sync for the current user.
-func (s *server) handleSync(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.currentUser(r)
-	if !ok {
-		httpError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		s.syncs.syncUser(ctx, user)
-	}()
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"ok":           true,
-		"sync_started": true,
-	})
-}
-
-// ---- API tokens ----
-
-func (s *server) handleListTokens(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.currentUser(r)
-	if !ok {
-		httpError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
-	tokens, err := tokensForUser(r.Context(), s.db, user.ID)
-	if err != nil {
-		httpError(w, http.StatusInternalServerError, "could not list tokens")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"api_tokens": tokens})
-}
-
-func (s *server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.currentUser(r)
-	if !ok {
-		httpError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
-	token, err := createToken(r.Context(), s.db, user.ID)
-	if err != nil {
-		logf("create token: %v", err)
-		httpError(w, http.StatusInternalServerError, "could not create token")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"token": token})
-}
-
-func (s *server) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.currentUser(r)
-	if !ok {
-		httpError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
-	token := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/tokens/"), "/")
-	if err := deleteToken(r.Context(), s.db, user.ID, token); err != nil {
-		httpError(w, http.StatusInternalServerError, "could not delete token")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
 // ---- helpers ----
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -217,24 +117,4 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func splitCSV(s string) []string {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	var out []string
-	for _, part := range strings.Split(s, ",") {
-		if p := strings.TrimSpace(part); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func nullIfEmpty(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }

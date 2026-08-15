@@ -22,8 +22,14 @@ The app:
 - `Sources/HUDView.swift`: SwiftUI layout and presentation.
 - `Sources/Models.swift`: shared data models.
 - `Sources/GitHub.swift`: `gh` command runner, GitHub queries, and `PRStore`.
+- `Sources/Vibecoders.swift`: vibecoders store — devtime heartbeats, leaderboard
+  fetches, and trust-based username handling (no OAuth, no tokens).
 - `Sources/Updater.swift`: GitHub Releases checking, validation, installation,
   and relaunch logic.
+- `backend/`: Go + Postgres "vibecoders" service (devtime leaderboard API and
+  embedded landing page) deployed on Render via `render.yaml`. Identity is
+  trust-based: users self-choose a username; there is deliberately no
+  authentication, OAuth, or GitHub activity tracking. See `backend/README.md`.
 - `Info.plist`: bundle metadata and source-of-truth version for local builds.
 - `build.sh`: universal macOS build and ad-hoc signing.
 - `scripts/next-version.sh`: deterministic automatic patch-version selection.

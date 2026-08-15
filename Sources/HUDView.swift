@@ -48,6 +48,7 @@ struct HUDView: View {
     @State private var tab: Tab = .open
     @State private var showStale: Bool = false
     @State private var staleHovered: Bool = false
+    @State private var usernameDraft = ""
     private enum Tab { case open, merged, crew }
 
     private static let staleThreshold: TimeInterval = 14 * 86400
@@ -300,7 +301,7 @@ struct HUDView: View {
     // MARK: Crew tab (vibecoders)
 
     @ViewBuilder private var crewContent: some View {
-        if !vibecoders.isSignedIn {
+        if !vibecoders.hasUsername {
             VStack(spacing: 14) {
                 Image(systemName: "person.3")
                     .font(.system(size: 26, weight: .medium))
@@ -309,14 +310,23 @@ struct HUDView: View {
                     .background(Color.purple.opacity(0.12), in: Circle())
                 Text("Join the vibecoders leaderboard")
                     .font(.system(size: 14, weight: .semibold))
-                Text("Sign in with GitHub to see who's online, who vibes hardest,\nand exactly how much devtime you've banked today.")
+                Text("Pick a username and your devtime starts counting the moment\nan editor is open. No GitHub sign-in, no tokens — we trust you.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                TextField("username", text: $usernameDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(.white.opacity(0.10)))
+                    .frame(width: 220)
+                    .onSubmit { vibecoders.setUsername(usernameDraft) }
                 Button {
-                    vibecoders.signIn()
+                    vibecoders.setUsername(usernameDraft)
                 } label: {
-                    Text("Sign in with GitHub")
+                    Text("Join the crew")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 18).padding(.vertical, 10)
@@ -350,21 +360,13 @@ struct HUDView: View {
 
     private var crewHeader: some View {
         HStack(spacing: 10) {
-            if let url = vibecoders.user?.avatarUrl, let u = URL(string: url) {
-                AsyncImage(url: u) { img in
-                    img.resizable().scaledToFill()
-                } placeholder: {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 16)).foregroundStyle(.secondary)
-                }
+            Text(String(vibecoders.username.prefix(1)).uppercased())
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.purple)
                 .frame(width: 30, height: 30)
-                .clipShape(Circle())
-            } else {
-                Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 30)).foregroundStyle(.secondary)
-            }
+                .background(Color.purple.opacity(0.16), in: Circle())
             VStack(alignment: .leading, spacing: 1) {
-                Text(vibecoders.login.isEmpty ? "" : "@\(vibecoders.login)")
+                Text("@\(vibecoders.username)")
                     .font(.system(size: 13, weight: .bold))
                 if let name = vcDisplayName(vibecoders.user?.name) {
                     Text(name)
@@ -380,30 +382,6 @@ struct HUDView: View {
             }
             .padding(.horizontal, 9).padding(.vertical, 5)
             .background(Color.purple.opacity(0.13), in: Capsule())
-            Button {
-                vibecoders.syncNow()
-            } label: {
-                Group {
-                    if vibecoders.syncing { Spinner(size: 11, color: .secondary) }
-                    else { Image(systemName: "arrow.clockwise") }
-                }
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 28, height: 28)
-                .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
-            .disabled(vibecoders.syncing)
-            .help("Sync GitHub stats now")
-            Button {
-                vibecoders.signOut()
-            } label: {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 28, height: 28)
-                    .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
-            .help("Sign out")
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
@@ -430,18 +408,6 @@ struct HUDView: View {
                         ForEach(vibecoders.online, id: \.login) { u in
                             HStack(spacing: 7) {
                                 Circle().fill(Color.green).frame(width: 7, height: 7)
-                                if let url = u.avatarUrl, let uu = URL(string: url) {
-                                    AsyncImage(url: uu) { img in
-                                        img.resizable().scaledToFill()
-                                    } placeholder: {
-                                        Image(systemName: "person.crop.circle.fill")
-                                            .font(.system(size: 12)).foregroundStyle(.secondary)
-                                    }
-                                    .frame(width: 20, height: 20).clipShape(Circle())
-                                } else {
-                                    Image(systemName: "person.crop.circle.fill")
-                                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                                }
                                 Text(vcDisplayName(u.name) ?? u.login)
                                     .font(.system(size: 12, weight: .semibold))
                                     .lineLimit(1).truncationMode(.tail)
@@ -473,21 +439,20 @@ struct HUDView: View {
                     .foregroundStyle(.secondary)
                     .kerning(1.2)
                 Spacer(minLength: 4)
-                ForEach(VCMetric.allCases, id: \.self) { m in
-                    metricButton(m, on: vibecoders.selectedMetric == m) {
-                        vibecoders.selectedMetric = m
-                    }
-                }
+                Text("today")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.purple)
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(Color.purple.opacity(0.13), in: Capsule())
             }
-            let entries = vibecoders.leaderboard(for: vibecoders.selectedMetric)
-            if entries.isEmpty {
-                Text("No stats yet — stats sync after sign-in and every few hours.")
+            if vibecoders.board.isEmpty {
+                Text("No devtime yet — open an editor and the minutes start stacking.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center).padding(.vertical, 18)
             } else {
                 VStack(spacing: 6) {
-                    ForEach(entries.prefix(10), id: \.login) { e in
-                        CrewRow(entry: e, metric: vibecoders.selectedMetric)
+                    ForEach(vibecoders.board.prefix(10), id: \.login) { e in
+                        CrewRow(entry: e)
                     }
                 }
             }
@@ -499,22 +464,6 @@ struct HUDView: View {
         .background(.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
             .strokeBorder(.white.opacity(0.06)))
-    }
-
-    private func metricButton(_ m: VCMetric, on: Bool, _ act: @escaping () -> Void) -> some View {
-        Button(action: act) {
-            Text(m.label)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(on ? Color.primary : .secondary)
-                .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(on ? Color.purple.opacity(0.22) : .clear,
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(.white.opacity(on ? 0.10 : 0)))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Show \(m.label.lowercased()) leaderboard")
     }
 
     private func relative(_ d: Date) -> String {
@@ -813,7 +762,6 @@ struct RunRow: View {
 
 struct CrewRow: View {
     let entry: VCLeaderboardEntry
-    let metric: VCMetric
     @State private var hovered = false
 
     private var rankColor: Color {
@@ -831,17 +779,11 @@ struct CrewRow: View {
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundStyle(rankColor)
                 .frame(width: 22)
-            if let url = entry.avatarUrl, let u = URL(string: url) {
-                AsyncImage(url: u) { img in
-                    img.resizable().scaledToFill()
-                } placeholder: {
-                    Image(systemName: "person.crop.circle.fill").foregroundStyle(.secondary)
-                }
-                .frame(width: 24, height: 24).clipShape(Circle())
-            } else {
-                Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 24)).foregroundStyle(.secondary)
-            }
+            Text(String(entry.login.prefix(1)).uppercased())
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.purple)
+                .frame(width: 24, height: 24)
+                .background(Color.purple.opacity(0.14), in: Circle())
             Text(vcDisplayName(entry.name) ?? entry.login)
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
@@ -851,9 +793,9 @@ struct CrewRow: View {
                     .help("Online now")
             }
             Spacer(minLength: 6)
-            Text(metric.format(entry.value))
+            Text(vcDuration(entry.value))
                 .font(.system(size: 13, weight: .bold)).monospacedDigit()
-                .foregroundStyle(metric == .devtime ? Color.purple : Color.primary)
+                .foregroundStyle(Color.purple)
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, minHeight: 40)
@@ -861,7 +803,7 @@ struct CrewRow: View {
                     in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
-        .help("@\(entry.login) · \(metric.label): \(metric.format(entry.value))")
+        .help("@\(entry.login) · devtime: \(vcDuration(entry.value))")
     }
 }
 
