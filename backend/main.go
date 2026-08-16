@@ -63,7 +63,9 @@ func main() {
 			httpError(w, http.StatusServiceUnavailable, "db unavailable")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		// "version" distinguishes the trust-based (no-auth) backend from the
+		// legacy GitHub-OAuth one when verifying a deploy.
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": "trust-based"})
 	})
 	mux.HandleFunc("GET /api/user", s.handleUser)
 	mux.HandleFunc("GET /api/online", s.handleOnline)
