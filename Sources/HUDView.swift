@@ -38,6 +38,74 @@ func openWebURL(_ string: String) {
     NSWorkspace.shared.open(url)
 }
 
+// MARK: - Username field (typing in a nonactivating overlay)
+
+/// An `NSTextField` that force-activates the app and keys the panel when
+/// clicked, so the HUD overlay — a nonactivating panel that never takes focus
+/// on its own — can actually receive keyboard input for the username.
+final class FocusableTextField: NSTextField {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKey()
+        return super.becomeFirstResponder()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKey()
+        super.mouseDown(with: event)
+    }
+}
+
+/// SwiftUI wrapper that reports focus changes (the app keeps the overlay up
+/// while the field is focused) and submits on Enter.
+struct UsernameField: NSViewRepresentable {
+    @Binding var text: String
+    var onEditing: (Bool) -> Void = { _ in }
+    var onSubmit: () -> Void = {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> FocusableTextField {
+        let field = FocusableTextField()
+        field.placeholderString = "username"
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        field.textColor = .white
+        field.alignment = .left
+        field.focusRingType = .none
+        field.usesSingleLineMode = true
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
+        field.lineBreakMode = .byTruncatingTail
+        field.delegate = context.coordinator
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.submit)
+        return field
+    }
+
+    func updateNSView(_ nsView: FocusableTextField, context: Context) {
+        if nsView.stringValue != text { nsView.stringValue = text }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        private var parent: UsernameField
+        init(_ parent: UsernameField) { self.parent = parent }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSTextField else { return }
+            parent.text = field.stringValue
+        }
+        func controlTextDidBeginEditing(_ obj: Notification) { parent.onEditing(true) }
+        func controlTextDidEndEditing(_ obj: Notification) { parent.onEditing(false) }
+        @objc func submit(_ sender: Any?) { parent.onSubmit() }
+    }
+}
+
 // MARK: - Overlay
 
 struct HUDView: View {
@@ -53,7 +121,6 @@ struct HUDView: View {
     @State private var showStale: Bool = false
     @State private var staleHovered: Bool = false
     @State private var usernameDraft = ""
-    @FocusState private var usernameFocused: Bool
     private enum Tab { case open, merged, crew }
 
     private static let staleThreshold: TimeInterval = 14 * 86400
@@ -319,23 +386,13 @@ struct HUDView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                TextField("username", text: $usernameDraft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 12).padding(.vertical, 9)
+                UsernameField(text: $usernameDraft,
+                              onEditing: onUsernameEditing,
+                              onSubmit: { vibecoders.setUsername(usernameDraft) })
+                    .frame(width: 220, height: 36)
                     .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .strokeBorder(.white.opacity(0.10)))
-                    .frame(width: 220)
-                    .focused($usernameFocused)
-                    .onChange(of: usernameFocused) { focused in
-                        if focused {
-                            NSApp.activate(ignoringOtherApps: true)
-                        }
-                        onUsernameEditing(focused)
-                    }
-                    .onTapGesture { NSApp.activate(ignoringOtherApps: true) }
-                    .onSubmit { vibecoders.setUsername(usernameDraft) }
                 Button {
                     vibecoders.setUsername(usernameDraft)
                 } label: {
