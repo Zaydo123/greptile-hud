@@ -17,6 +17,7 @@ cp "$ROOT/Info.plist" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
 
 SOURCES=(
+    "$ROOT/Sources/Theme.swift"
     "$ROOT/Sources/Models.swift"
     "$ROOT/Sources/GitHub.swift"
     "$ROOT/Sources/Updater.swift"

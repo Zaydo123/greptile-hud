@@ -14,11 +14,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var escMonitor: Any?
     private var localEscMonitor: Any?
     private var refreshTimer: Timer?
+    private var liveTimer: Timer?
+    private var hideToken = 0
     private var updateCheckTimer: Timer?
     private var vibecodersTimer: Timer?
 
     private var rightShiftDown = false
-    private var pinned = false
+    private var latchTimer: Timer?
+
+    /// Latched-open state, mirrored into `hudState` so the overlay can show it.
+    private let hudState = HUDState()
+    private var pinned: Bool {
+        get { hudState.pinned }
+        set { hudState.pinned = newValue }
+    }
     private var usernameFieldEditing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -67,10 +76,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let show = NSMenuItem(title: "Show HUD (pinned)", action: #selector(togglePinned), keyEquivalent: "")
         let refresh = NSMenuItem(title: "Refresh now", action: #selector(refreshNow), keyEquivalent: "r")
         let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
-        [show, refresh, updates].forEach { $0.target = self }
+        let reset = NSMenuItem(title: "Reset Position & Size", action: #selector(resetPanelFrame), keyEquivalent: "")
+        [show, refresh, updates, reset].forEach { $0.target = self }
         menu.addItem(show)
         menu.addItem(refresh)
         menu.addItem(updates)
+        menu.addItem(reset)
 
         menu.addItem(.separator())
         addVibecodersMenu(menu)
@@ -163,26 +174,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let p = NSPanel(contentRect: NSRect(x: 0, y: 0,
                                            width: HUDMetrics.panelWidth,
                                            height: HUDMetrics.panelHeight),
-                        styleMask: [.borderless, .nonactivatingPanel],
+                        styleMask: [.borderless, .nonactivatingPanel, .resizable],
                         backing: .buffered, defer: false)
         p.level = .screenSaver
         p.isOpaque = false
         p.backgroundColor = .clear
         p.hasShadow = false
-        p.isMovableByWindowBackground = false
+        p.isMovableByWindowBackground = true   // drag the HUD anywhere by its background
         p.hidesOnDeactivate = false
         p.isFloatingPanel = true
         p.becomesKeyOnlyIfNeeded = true   // let the username field take typing without stealing focus on every peek
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        p.contentMinSize = NSSize(width: HUDMetrics.panelWidth, height: HUDMetrics.panelHeight)
-        p.contentMaxSize = p.contentMinSize
+        p.contentMinSize = NSSize(width: HUDMetrics.minPanelWidth, height: HUDMetrics.minPanelHeight)
+        p.contentMaxSize = NSSize(width: 4000, height: 3000)
+        p.delegate = self
 
-        let host = NSHostingView(rootView: HUDView(store: store, vibecoders: vibecoders, onClose: { [weak self] in
-            self?.pinned = false
-            self?.usernameFieldEditing = false
-            self?.hideOverlay(force: true)
+        let host = NSHostingView(rootView: HUDView(store: store, vibecoders: vibecoders, hud: hudState, onClose: { [weak self] in
+            self?.dismissOverlay()
         }, onUsernameEditing: { [weak self] editing in
             self?.usernameFieldEditing = editing
+        }, onResize: { [weak self] translation in
+            self?.resizePanel(translation: translation)
+        }, onResizeEnded: { [weak self] in
+            self?.endResizePanel()
         }))
         host.autoresizingMask = [.width, .height]
         host.frame = p.contentView?.bounds ?? .zero
@@ -190,7 +204,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.panel = p
     }
 
+    /// Put the HUD back where you left it. Only falls back to centring under the
+    /// mouse when there's no usable saved frame — e.g. first run, or the screen
+    /// it was parked on is gone.
     private func positionPanel() {
+        if let saved = savedFrame() {
+            panel.setFrame(saved, display: false)
+            return
+        }
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         guard let visible = screen?.frame else { return }
@@ -199,28 +220,121 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      y: visible.midY - f.height / 2))
     }
 
+    // MARK: Frame persistence + resize
+
+    private static let frameKey = "hud.panel.frame"
+
+    /// The remembered frame, if it still lands on a connected screen.
+    private func savedFrame() -> NSRect? {
+        guard let raw = UserDefaults.standard.string(forKey: Self.frameKey) else { return nil }
+        let rect = NSRectFromString(raw)
+        guard rect.width >= HUDMetrics.minPanelWidth,
+              rect.height >= HUDMetrics.minPanelHeight else { return nil }
+        // Needs a decent chunk on-screen, or a since-disconnected display would
+        // strand the HUD somewhere you can't reach it.
+        let visible = NSScreen.screens.contains { screen in
+            let overlap = screen.visibleFrame.intersection(rect)
+            return overlap.width > 120 && overlap.height > 80
+        }
+        return visible ? rect : nil
+    }
+
+    private func saveFrame() {
+        UserDefaults.standard.set(NSStringFromRect(panel.frame), forKey: Self.frameKey)
+    }
+
+    private var resizeStart: NSRect?
+
+    /// Corner-drag resize. The top-left corner stays put while the bottom-right
+    /// follows the cursor, clamped to the minimum size and the current screen.
+    private func resizePanel(translation: CGSize) {
+        let start = resizeStart ?? panel.frame
+        if resizeStart == nil { resizeStart = start }
+        let limit = (panel.screen ?? NSScreen.main)?.visibleFrame.size
+            ?? NSSize(width: 4000, height: 3000)
+        let w = min(limit.width, max(HUDMetrics.minPanelWidth, start.width + translation.width))
+        let h = min(limit.height, max(HUDMetrics.minPanelHeight, start.height + translation.height))
+        panel.setFrame(NSRect(x: start.minX, y: start.maxY - h, width: w, height: h), display: true)
+    }
+
+    private func endResizePanel() {
+        resizeStart = nil
+        saveFrame()
+    }
+
+    @objc private func resetPanelFrame() {
+        UserDefaults.standard.removeObject(forKey: Self.frameKey)
+        panel.setContentSize(NSSize(width: HUDMetrics.panelWidth, height: HUDMetrics.panelHeight))
+        positionPanel()
+        saveFrame()
+    }
+
     private func showOverlay(pinned: Bool) {
         if pinned { self.pinned = true }
         Task { await store.refresh() }
-        positionPanel()
-        panel.alphaValue = 0
-        panel.orderFrontRegardless()
-        positionPanel()
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.12
-            panel.animator().alphaValue = 1
+        startLiveRefresh()
+        hideToken += 1   // supersede any fade-out still in flight
+
+        // A latched overlay stays where it is — only a fresh show re-centers it,
+        // so tapping Right Shift doesn't make a pinned HUD hop between screens.
+        if !panel.isVisible {
+            positionPanel()
+            panel.alphaValue = 0
+            panel.orderFrontRegardless()
+            positionPanel()
         }
+        // Covers the re-peek-mid-fade case too: the panel is still "visible" but
+        // halfway transparent, so fade it back in rather than leaving it dim.
+        if panel.alphaValue < 1 {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.12
+                panel.animator().alphaValue = 1
+            }
+        }
+    }
+
+    /// While the HUD is actually on screen, poll far more often than the
+    /// once-a-minute background sweep — Actions runs and their steps move
+    /// second to second. Stops the moment the overlay goes away.
+    private func startLiveRefresh() {
+        guard liveTimer == nil else { return }
+        liveTimer = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { [weak self] _ in
+            Task { await self?.store.refreshLive() }
+        }
+    }
+
+    private func stopLiveRefresh() {
+        liveTimer?.invalidate()
+        liveTimer = nil
+    }
+
+    /// Every explicit close (✕, Esc, the pin button) goes through here: drop the
+    /// latch, cancel any in-flight hold so it can't re-latch a hidden HUD, hide.
+    private func dismissOverlay() {
+        pinned = false
+        usernameFieldEditing = false
+        latchTimer?.invalidate()
+        latchTimer = nil
+        hudState.holdStartedAt = nil
+        hideOverlay(force: true)
     }
 
     private func hideOverlay(force: Bool = false) {
         if pinned && !force { return }
+        hideToken += 1
+        let token = hideToken
         let panel = self.panel!
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.12
             panel.animator().alphaValue = 0
-        }, completionHandler: {
-            MainActor.assumeIsolated { panel.orderOut(nil) }
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                // A show that landed during the fade wins — don't order out under it.
+                guard let self, self.hideToken == token else { return }
+                panel.orderOut(nil)
+            }
         })
+        stopLiveRefresh()
     }
 
     // MARK: Hotkey + monitors
@@ -235,9 +349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] e in
             guard let self else { return }
             if e.keyCode == 53, self.pinned || self.usernameFieldEditing {   // Esc closes a pinned HUD (or while typing)
-                self.pinned = false
-                self.usernameFieldEditing = false
-                self.hideOverlay(force: true)
+                self.dismissOverlay()
             }
         }
         // Global monitors don't fire for our own events; once the app is active
@@ -245,9 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         localEscMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] e in
             guard let self else { return e }
             if e.keyCode == 53, self.pinned || self.usernameFieldEditing {
-                self.pinned = false
-                self.usernameFieldEditing = false
-                self.hideOverlay(force: true)
+                self.dismissOverlay()
             }
             return e
         }
@@ -258,11 +368,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let down = e.modifierFlags.contains(.shift)
         if down && !rightShiftDown {
             rightShiftDown = true
+            // Already latched? Then Right Shift is the toggle that closes it —
+            // same key in, same key out, no hold needed.
+            if pinned {
+                dismissOverlay()
+                return
+            }
+            hudState.holdStartedAt = Date()
             showOverlay(pinned: false)
+            // Keep holding and the peek latches into a pinned HUD — see
+            // `latchFromHold`. Dropping it again is a click, not a hold.
+            latchTimer?.invalidate()
+            latchTimer = Timer.scheduledTimer(withTimeInterval: HUDState.latchDelay, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.latchFromHold() }
+            }
         } else if !down && rightShiftDown {
             rightShiftDown = false
-            if !usernameFieldEditing { hideOverlay() }   // don't vanish while the username field is focused
+            hudState.holdStartedAt = nil
+            latchTimer?.invalidate()
+            latchTimer = nil
+            if !usernameFieldEditing { hideOverlay() }   // no-op once latched; don't vanish mid-typing either
         }
+    }
+
+    /// Fired once Right Shift has been held for `HUDState.latchDelay`: latch the
+    /// overlay open so it survives the release. Unlatching is a click on the pin
+    /// (or Esc / ✕) — never another hold.
+    private func latchFromHold() {
+        latchTimer = nil
+        guard rightShiftDown, panel.isVisible, !pinned else { return }
+        pinned = true
     }
 
     // MARK: Menu actions
@@ -308,6 +443,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 // MARK: - Menu rebuild on open (fresh leaderboard/online state)
+
+extension AppDelegate: NSWindowDelegate {
+    func windowDidMove(_ notification: Notification) { saveFrame() }
+    func windowDidResize(_ notification: Notification) { saveFrame() }
+}
 
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
