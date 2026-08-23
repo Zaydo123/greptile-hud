@@ -739,7 +739,12 @@ final class PRStore: ObservableObject {
             .prefix(10)
         guard !detailIdx.isEmpty else { return }
         await withTaskGroup(of: (Int, WorkflowRun).self) { group in
-            for i in detailIdx { group.addTask { (i, await GH.fetchRunProgress(kept[i])) } }
+            for i in detailIdx {
+                // Bind the run itself: capturing `kept` would hand a mutable array
+                // to concurrent tasks (an error under Swift 6 concurrency checking).
+                let pending = kept[i]
+                group.addTask { (i, await GH.fetchRunProgress(pending)) }
+            }
             for await (i, r) in group { kept[i] = r }
         }
         runs = kept
