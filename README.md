@@ -117,8 +117,22 @@ the pipeline runs exactly once regardless of what GitHub supports.
 
 A PR that unexpectedly conflicts is left behind and reported rather than
 failing the whole train. If nothing lands, or the combined PR can't be opened,
-the scratch branch is deleted — no debris. The source PRs stay open and close
-themselves as their commits reach the base branch.
+the scratch branch is deleted — no debris.
+
+**Landing the train.** The assembled card carries a **Merge train** button, so
+one click merges the combined PR without leaving the HUD. That merge prefers a
+real merge commit — the source PRs' own commits reach the base branch inside
+the train's history, so GitHub marks each source PR *merged* and closes it
+itself. On repos that only allow squash merges the HUD falls back to squash and
+closes any source PR still open itself (with a "🚄 Landed via merge train"
+comment), then deletes the scratch branch either way.
+
+Open trains are remembered across restarts: until the combined PR lands, the
+Train tab shows an **Open train** card with the same Merge/Open buttons. If the
+train merges elsewhere (on the web), the next refresh notices it, applies the
+same cleanup to the source PRs and branch, and reports the landing. Trains are
+forgotten after a week, or immediately if their combined PR is closed without
+merging.
 
 ## Your Actions column (GitHub Actions / CI)
 
@@ -255,7 +269,11 @@ Everything comes from the GitHub API via `gh`:
 - the ↻ button posts `@greptile` as an issue comment
 - the merge button calls `PUT /repos/<repo>/pulls/<n>/merge` (squash)
 - a merge train uses `POST /git/refs`, `POST /merges` per PR, then
-  `POST /pulls` for the combined PR
+  `POST /pulls` for the combined PR; landing one calls
+  `PUT /pulls/<n>/merge` (merge commit, falling back to squash), closes
+  still-open source PRs with `PATCH /pulls/<n>`, and deletes the train branch
+- open trains are remembered in `UserDefaults` (`hud.trains.active`) and
+  reconciled on refresh via `GET /repos/<repo>/pulls/<n>`
 - `repos/<repo>/actions/runs?actor=<you>` per open-PR repo → your CI runs for the
   **Your Actions** column (filtered to merge/push/PR/dispatch events)
 

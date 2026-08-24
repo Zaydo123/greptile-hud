@@ -192,16 +192,45 @@ struct TrainConflict: Identifiable, Equatable {
     var id: String { "\(a)|\(b)" }
 }
 
-/// Outcome of assembling a train: either a new combined PR, or what went wrong.
+/// Lifecycle of a combine-mode train's combined pull request.
+enum TrainState: Equatable {
+    case assembled      // open on GitHub, ready to merge
+    case merging        // the merge call is in flight
+    case landed         // merged — source PRs closed or marked merged
+}
+
+/// Outcome of assembling a train: the combined PR plus everyone who boarded.
 struct TrainResult: Equatable {
-    var branch: String
+    var repo: String
+    var base: String            // branch the train targets
+    var branch: String          // the scratch train branch
+    var number: Int?            // the combined PR (nil only if GitHub never said)
     var url: String?
-    var mergedPRs: [Int]       // PR numbers that landed on the train branch
+    var mergedPRs: [Int]        // PR numbers that landed on the train branch
     var skipped: [(Int, String)] = []   // PR number → why it was left behind
-    var error: String?
+    var state: TrainState = .assembled
+    var closedPRs: [Int] = []   // source PRs this HUD closed once the train landed
 
     static func == (l: TrainResult, r: TrainResult) -> Bool {
-        l.branch == r.branch && l.url == r.url && l.mergedPRs == r.mergedPRs
-            && l.error == r.error && l.skipped.map(\.0) == r.skipped.map(\.0)
+        l.repo == r.repo && l.branch == r.branch && l.number == r.number
+            && l.url == r.url && l.mergedPRs == r.mergedPRs && l.state == r.state
+            && l.closedPRs == r.closedPRs && l.skipped.map(\.0) == r.skipped.map(\.0)
     }
+}
+
+/// A combine-mode train whose combined PR is still open. Remembered in
+/// UserDefaults so it survives restarts and stays one click away until it
+/// lands — wherever that merge happens (here or on the web), the source PRs
+/// get closed and the scratch branch dropped.
+struct ActiveTrain: Codable, Identifiable, Equatable {
+    let repo: String
+    let base: String
+    let branch: String
+    let number: Int             // the combined PR
+    let url: String
+    let prs: [Int]              // source PR numbers riding the train
+    let skipped: [String]       // "#12 — conflicts with the train"
+    let createdAt: Date
+
+    var id: String { "\(repo)#\(number)" }
 }

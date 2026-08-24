@@ -1073,13 +1073,16 @@ struct TrainTab: View {
             controls
             Rectangle().fill(Tokyo.line).frame(height: 1)
             // A stack that already exists stays visible (and flattenable) even once
-            // there's nothing left to build from.
-            if groups.isEmpty && store.detectedStacks.isEmpty {
+            // there's nothing left to build from. So does a train in motion.
+            if groups.isEmpty && store.detectedStacks.isEmpty
+                && store.activeTrains.isEmpty && store.trainResult == nil {
                 emptyState
             } else {
                 ScrollView {
                     VStack(spacing: 12) {
                         if let r = store.trainResult { resultCard(r) }
+                        ForEach(store.activeTrains) { t in activeTrainCard(t) }
+                        if let n = store.trainNotice { noticeCard(n) }
                         if let n = store.stackNotice { noticeCard(n) }
                         if let e = store.trainError { errorCard(e) }
                         ForEach(store.detectedStacks) { st in stackCard(st) }
@@ -1446,17 +1449,45 @@ struct TrainTab: View {
     private func resultCard(_ r: TrainResult) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Image(systemName: "checkmark.seal.fill").font(.system(size: 11, weight: .bold))
-                Text("Train assembled — \(r.mergedPRs.count) PRs, one pipeline")
+                Image(systemName: r.state == .landed ? "checkmark.seal.fill" : "tram.fill")
+                    .font(.system(size: 11, weight: .bold))
+                Text(r.state == .landed
+                     ? "Train landed — \(r.mergedPRs.count) PR\(r.mergedPRs.count == 1 ? "" : "s"), one pipeline"
+                     : "Train assembled — \(r.mergedPRs.count) PR\(r.mergedPRs.count == 1 ? "" : "s"), one pipeline")
                     .font(.system(size: 12, weight: .bold))
                 Spacer(minLength: 4)
+                if let train = store.activeTrain(for: r) {
+                    Button {
+                        Task { await store.mergeTrain(train) }
+                    } label: {
+                        HStack(spacing: 5) {
+                            if r.state == .merging { Spinner(size: 11, color: Tokyo.bgDark) }
+                            else {
+                                Image(systemName: "arrow.triangle.merge")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            Text(r.state == .merging ? "Merging…" : "Merge train")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundStyle(Tokyo.bgDark)
+                        .padding(.horizontal, 10).frame(height: 26)
+                        .background(Tokyo.green, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(store.trainBuilding || r.state != .assembled)
+                    .help("Merge the combined PR now — source PRs close automatically when it lands")
+                }
                 if let url = r.url, !url.isEmpty {
                     Button { openWebURL(url) } label: {
-                        Text("Open PR")
+                        Text(r.state == .landed ? "Open PR" : "Open")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Tokyo.bgDark)
+                            .foregroundStyle(Tokyo.green)
                             .padding(.horizontal, 10).frame(height: 26)
-                            .background(Tokyo.green, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .background(Tokyo.green.opacity(0.12),
+                                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .strokeBorder(Tokyo.green.opacity(0.35)))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1469,12 +1500,61 @@ struct TrainTab: View {
                 Text("Left behind: " + r.skipped.map { "#\($0.0) (\($0.1))" }.joined(separator: ", "))
                     .font(.system(size: 10)).foregroundStyle(Tokyo.orange)
             }
+            if r.state == .landed {
+                Text(r.closedPRs.isEmpty
+                     ? "Source PRs are done — GitHub marked them merged along with the train."
+                     : "Closed " + r.closedPRs.map { "#\($0)" }.joined(separator: ", ") + ".")
+                    .font(.system(size: 10)).foregroundStyle(Tokyo.fgDim)
+            } else if store.activeTrain(for: r) != nil {
+                Text("One click merges the combined PR and closes every source PR — no trip to the browser.")
+                    .font(.system(size: 10)).foregroundStyle(Tokyo.comment)
+            }
         }
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Tokyo.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
             .strokeBorder(Tokyo.green.opacity(0.3)))
+    }
+
+    /// A train built earlier whose combined PR is still open — kept across
+    /// launches, still landable in one click.
+    private func activeTrainCard(_ t: ActiveTrain) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 7) {
+                Image(systemName: "tram.fill")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokyo.teal)
+                Text("Open train #\(t.number)")
+                    .font(.system(size: 12, weight: .bold))
+                Text("\(t.prs.count) PR\(t.prs.count == 1 ? "" : "s") riding")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Tokyo.comment)
+                Spacer(minLength: 4)
+                if !t.url.isEmpty {
+                    pillButton("Merge", icon: "arrow.triangle.merge", tone: Tokyo.green,
+                               help: "Merge the combined PR now — source PRs close automatically when it lands") {
+                        Task { await store.mergeTrain(t) }
+                    }
+                    .disabled(store.trainBuilding)
+                    pillButton("Open", icon: "arrow.up.forward", tone: Tokyo.teal,
+                               help: "Open #\(t.number)") { openWebURL(t.url) }
+                }
+            }
+            Text(t.prs.map { "#\($0)" }.joined(separator: " + "))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Tokyo.teal)
+            Text("\(t.repo) · \(t.branch) → \(t.base)")
+                .font(.system(size: 9, design: .monospaced)).foregroundStyle(Tokyo.comment)
+            if !t.skipped.isEmpty {
+                Text("Left behind: " + t.skipped.joined(separator: ", "))
+                    .font(.system(size: 10)).foregroundStyle(Tokyo.orange)
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Tokyo.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .strokeBorder(Tokyo.teal.opacity(0.28)))
     }
 
     private func errorCard(_ text: String) -> some View {

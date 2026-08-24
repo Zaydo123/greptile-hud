@@ -551,7 +551,8 @@ enum GH {
         let baseSHA = try await branchSHA(repo: repo, branch: base)
         try await createBranch(repo: repo, branch: branchName, sha: baseSHA)
 
-        var result = TrainResult(branch: branchName, url: nil, mergedPRs: [])
+        var result = TrainResult(repo: repo, base: base, branch: branchName,
+                                 number: nil, url: nil, mergedPRs: [])
         do {
             for pr in prs {
                 guard let head = pr.headRef, !head.isEmpty else {
@@ -580,13 +581,17 @@ enum GH {
             body += "\nLeft behind (conflicting):\n"
             for (n, why) in result.skipped { body += "- #\(n) — \(why)\n" }
         }
-        body += "\nMerging this closes nothing automatically; the source PRs land as their commits arrive on `\(base)`."
+        body += "\nMerging this train lands every PR above through one pipeline; the source PRs are closed as it lands."
 
         do {
             result.url = try await openPR(
                 repo: repo,
                 title: "Merge train: \(included.map { "#\($0.number)" }.joined(separator: " + "))",
                 head: branchName, base: base, body: body)
+            // The combined PR number is what keeps the train actionable later.
+            if let url = result.url, !url.isEmpty {
+                result.number = Int(url.split(separator: "/").last.map(String.init) ?? "")
+            }
         } catch {
             await deleteBranch(repo: repo, branch: branchName)
             throw error
@@ -600,6 +605,66 @@ enum GH {
             }
         }
         return result
+    }
+
+    // MARK: - Landing a train
+
+    private struct TrainStateJSON: Decodable { let state: String; let merged: Bool }
+
+    /// Where a combined train PR stands right now (nil if GitHub won't say).
+    static func trainPRState(repo: String, number: Int) async -> (state: String, merged: Bool)? {
+        guard let data = try? await run([
+            "api", "repos/\(repo)/pulls/\(number)", "--jq", "{state: .state, merged: .merged}"
+        ]), let s = try? JSONDecoder().decode(TrainStateJSON.self, from: data) else { return nil }
+        return (s.state, s.merged)
+    }
+
+    /// Merge the combined train PR. A real merge commit is preferred: the source
+    /// PRs' own commits ride along in history, so GitHub marks them merged and
+    /// closes them itself. Repos that forbid merge commits reject that method —
+    /// fall back to squash there and close the source PRs explicitly instead.
+    static func mergeTrain(repo: String, number: Int, title: String) async throws -> String {
+        do {
+            _ = try await run([
+                "api", "-X", "PUT", "repos/\(repo)/pulls/\(number)/merge",
+                "-f", "merge_method=merge", "-f", "commit_title=\(title)"
+            ])
+            return "merge"
+        } catch {
+            _ = try await run([
+                "api", "-X", "PUT", "repos/\(repo)/pulls/\(number)/merge",
+                "-f", "merge_method=squash", "-f", "commit_title=\(title)"
+            ])
+            return "squash"
+        }
+    }
+
+    /// Post-landing cleanup: close any source PR still open (with a pointer to
+    /// the train), then cut the scratch branch. Best-effort throughout; returns
+    /// the PR numbers this closed — ones GitHub already marked merged are left
+    /// untouched.
+    static func finishTrain(repo: String, branch: String, sourcePRs: [Int],
+                            trainURL: String?) async -> [Int] {
+        var closed: [Int] = []
+        for n in sourcePRs {
+            var isOpen = false
+            if let data = try? await run(["api", "repos/\(repo)/pulls/\(n)", "--jq", ".state"]),
+               String(data: data, encoding: .utf8)?
+                   .trimmingCharacters(in: .whitespacesAndNewlines) == "open" {
+                isOpen = true
+            }
+            guard isOpen else { continue }
+            if let url = trainURL, !url.isEmpty {
+                _ = try? await run(["api", "repos/\(repo)/issues/\(n)/comments",
+                                    "-f", "body=🚄 Landed via merge train: \(url)"])
+            }
+            if (try? await run(["api", "-X", "PATCH", "repos/\(repo)/pulls/\(n)",
+                                "-f", "state=closed"])) != nil {
+                closed.append(n)
+            }
+        }
+        await deleteBranch(repo: repo, branch: branch)
+        return closed
     }
 }
 
@@ -633,6 +698,26 @@ final class PRStore: ObservableObject {
     @Published var trainError: String?
     @Published var trainMode: TrainMode = .stack
     @Published var stackNotice: String?               // "Stacked 3 PRs" / "Flattened"
+    @Published var trainNotice: String?               // "🚄 Train #21 merged — closed #12, #14"
+
+    /// Trains whose combined PR is still open, remembered across launches so
+    /// they stay one click away until they land.
+    @Published var activeTrains: [ActiveTrain] = []
+    private static let activeTrainsKey = "hud.trains.active"
+
+    init() {
+        if let data = UserDefaults.standard.data(forKey: Self.activeTrainsKey),
+           let saved = try? JSONDecoder().decode([ActiveTrain].self, from: data) {
+            let cutoff = Date().addingTimeInterval(-7 * 24 * 3600)
+            activeTrains = Array(saved.filter { $0.createdAt > cutoff }.prefix(5))
+        }
+    }
+
+    private func saveTrains() {
+        if let data = try? JSONEncoder().encode(activeTrains) {
+            UserDefaults.standard.set(data, forKey: Self.activeTrainsKey)
+        }
+    }
 
     /// How the Train tab lands a selection.
     enum TrainMode: String, CaseIterable {
@@ -680,6 +765,7 @@ final class PRStore: ObservableObject {
             self.trainSelection = self.trainSelection.intersection(live)
             self.lastRefresh = Date()
             self.merged = (try? await GH.fetchMergedPRs()) ?? self.merged
+            await syncTrains()
             await refreshRuns(for: enriched)
         } catch {
             self.errorText = friendly(error)
@@ -880,11 +966,13 @@ final class PRStore: ObservableObject {
         }
         trainSelection.insert(pr.id)
         trainResult = nil
+        trainNotice = nil
     }
 
     func clearTrainSelection() {
         trainSelection.removeAll()
         trainResult = nil
+        trainNotice = nil
         trainError = nil
     }
 
@@ -892,6 +980,7 @@ final class PRStore: ObservableObject {
     /// confidence-first, adding every PR that doesn't touch a file already claimed.
     func smartSelectTrain() {
         trainResult = nil
+        trainNotice = nil
         trainError = nil
         guard let group = trainGroups.first else {
             trainSelection.removeAll()
@@ -958,6 +1047,7 @@ final class PRStore: ObservableObject {
         trainBuilding = true
         trainError = nil
         trainResult = nil
+        trainNotice = nil
         stackNotice = nil
         defer { trainBuilding = false }
 
@@ -988,6 +1078,8 @@ final class PRStore: ObservableObject {
     }
 
     /// Cut the train branch, merge every selected PR into it, open the combined PR.
+    /// The train is then remembered (and shown with a one-click Merge) until it
+    /// lands.
     func buildTrain() async {
         guard !trainBuilding else { return }
         let picked = selectedPRs
@@ -998,6 +1090,7 @@ final class PRStore: ObservableObject {
         trainBuilding = true
         trainError = nil
         trainResult = nil
+        trainNotice = nil
         defer { trainBuilding = false }
 
         let stamp = trainStampFormatter.string(from: Date())
@@ -1007,10 +1100,99 @@ final class PRStore: ObservableObject {
                                                  prs: picked, branchName: branch)
             trainResult = result
             trainSelection.removeAll()
+            // Remember it so the combined PR stays actionable across restarts.
+            if let number = result.number {
+                let train = ActiveTrain(repo: result.repo, base: result.base,
+                                        branch: result.branch, number: number,
+                                        url: result.url ?? "", prs: result.mergedPRs,
+                                        skipped: result.skipped.map { "#\($0.0) — \($0.1)" },
+                                        createdAt: Date())
+                activeTrains.insert(train, at: 0)
+                activeTrains = Array(activeTrains.prefix(5))
+                saveTrains()
+            }
             await refresh(force: true)
         } catch {
             trainError = friendly(error)
         }
+    }
+
+    /// Land the train in one click: merge the combined PR right here, close any
+    /// source PR still open, and drop the scratch branch.
+    func mergeTrain(_ train: ActiveTrain) async {
+        guard !trainBuilding else { return }
+        trainBuilding = true
+        trainError = nil
+        defer { trainBuilding = false }
+
+        let wasCurrent = trainResult?.number == train.number
+        if wasCurrent { trainResult?.state = .merging }
+
+        let title = "Merge train: \(train.prs.map { "#\($0)" }.joined(separator: " + ")) (#\(train.number))"
+        do {
+            _ = try await GH.mergeTrain(repo: train.repo, number: train.number, title: title)
+            let closed = await GH.finishTrain(repo: train.repo, branch: train.branch,
+                                              sourcePRs: train.prs, trainURL: train.url)
+            activeTrains.removeAll { $0.id == train.id }
+            saveTrains()
+            if wasCurrent {
+                trainResult?.state = .landed
+                trainResult?.closedPRs = closed
+            }
+            trainNotice = closed.isEmpty
+                ? "🚄 Train #\(train.number) merged — \(train.prs.count) PR\(train.prs.count == 1 ? "" : "s") landed"
+                : "🚄 Train #\(train.number) merged — closed \(closed.map { "#\($0)" }.joined(separator: ", "))"
+            await refresh(force: true)
+        } catch {
+            if wasCurrent { trainResult?.state = .assembled }
+            trainError = friendly(error)
+        }
+    }
+
+    /// The persisted train matching an assembled result — what its Merge button acts on.
+    func activeTrain(for result: TrainResult) -> ActiveTrain? {
+        if let n = result.number, let t = activeTrains.first(where: { $0.number == n }) { return t }
+        guard let n = result.number, let url = result.url else { return nil }
+        return ActiveTrain(repo: result.repo, base: result.base, branch: result.branch,
+                           number: n, url: url, prs: result.mergedPRs,
+                           skipped: result.skipped.map { "#\($0.0) — \($0.1)" },
+                           createdAt: Date())
+    }
+
+    /// Reconcile remembered trains with GitHub. A combined PR that landed while
+    /// we were away gets the same treatment as one merged here — source PRs
+    /// closed, scratch branch dropped, record retired with a notice. A train
+    /// closed without merging is simply forgotten.
+    private func syncTrains() async {
+        guard !activeTrains.isEmpty else { return }
+        var remaining: [ActiveTrain] = []
+        var changed = false
+        var landedNotice: String?
+        for t in activeTrains where t.createdAt.timeIntervalSinceNow > -7 * 24 * 3600 {
+            guard let st = await GH.trainPRState(repo: t.repo, number: t.number) else {
+                remaining.append(t)
+                continue
+            }
+            if st.merged {
+                let closed = await GH.finishTrain(repo: t.repo, branch: t.branch,
+                                                  sourcePRs: t.prs, trainURL: t.url)
+                landedNotice = closed.isEmpty
+                    ? "🚄 Train #\(t.number) landed — \(t.prs.count) PR\(t.prs.count == 1 ? "" : "s") landed"
+                    : "🚄 Train #\(t.number) landed — closed \(closed.map { "#\($0)" }.joined(separator: ", "))"
+                changed = true
+                continue
+            }
+            if st.state == "closed" {   // abandoned without merging
+                changed = true
+                continue
+            }
+            remaining.append(t)
+        }
+        if changed || remaining.count != activeTrains.count {
+            activeTrains = remaining
+            saveTrains()
+        }
+        if let n = landedNotice { trainNotice = n }
     }
 }
 

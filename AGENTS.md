@@ -188,7 +188,18 @@ Merging is irreversible and outward-facing, so:
 - Both merge entry points stay two-step: the card button arms then confirms;
   a train is assembled only from an explicit selection plus a **Build train**
   click. Never merge or open a PR as a side effect of a refresh, a hover, or a
-  tab switch.
+  tab switch. The one deliberate exception is the assembled train itself: once
+  the combined PR exists (via that explicit Build train click), landing it is
+  one click — the **Merge train** button on the result card or its Open-train
+  card. Don't extend one-click merging beyond the combined train PR.
+- A train doesn't end at assembly. `PRStore.activeTrains` remembers open
+  trains across launches; when a combined PR lands (here or merged on the web,
+  noticed by `syncTrains`), still-open source PRs are closed with a
+  "Landed via merge train" comment and the scratch branch is deleted.
+  `GH.mergeTrain` prefers a real merge commit so GitHub marks source PRs
+  merged itself, falling back to squash (then explicit closes) on squash-only
+  repos. Trains are dropped after 7 days, or at once if their combined PR
+  closes unmerged.
 - Train assembly must stay self-cleaning: if no PR lands, or the combined PR
   can't be opened, delete the scratch branch (`greptile-hud/train-<stamp>`)
   before returning. A single conflicting PR is skipped and reported, not fatal.
