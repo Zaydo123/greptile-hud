@@ -367,8 +367,8 @@ struct HUDView: View {
                         Text("\(vcDuration(vibecoders.devtimeToday)) today")
                             .monospacedDigit()
                     }
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Tokyo.comment)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Tokyo.fgDim)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(vibecoders.todayPeriodDescription)
@@ -402,14 +402,10 @@ struct HUDView: View {
     private var clock: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { ctx in
             VStack(alignment: .trailing, spacing: 1) {
-                HStack(spacing: 5) {
-                    Text(HUDClock.time.string(from: ctx.date))
-                        .font(.system(size: 15, weight: .bold, design: .monospaced))
-                        .monospacedDigit()
-                    Text("CURRENT TIME")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                }
-                .foregroundStyle(Tokyo.cyan)
+                Text(HUDClock.time.string(from: ctx.date))
+                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Tokyo.cyan)
+                    .monospacedDigit()
                 Text(syncLine(ctx.date))
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(Tokyo.comment)
@@ -1044,6 +1040,9 @@ struct SprintMap: View {
     let periodStart: Date?
     let periodEnd: Date?
 
+    @State private var hoveredBlockID: String?
+    @State private var hoveredBlockHelp: String?
+
     private static var utcCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -1092,6 +1091,25 @@ struct SprintMap: View {
         .padding(10)
         .background(Tokyo.bgDark.opacity(0.55), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Tokyo.stroke()))
+        .overlay(alignment: .topTrailing) {
+            if let hoveredBlockHelp {
+                Text(hoveredBlockHelp)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Tokyo.fg)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 260, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Tokyo.bg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Tokyo.magenta.opacity(0.55)))
+                    .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+                    .padding(7)
+                    .allowsHitTesting(false)
+                    .zIndex(10)
+            }
+        }
     }
 
     private var hourlyGrid: some View {
@@ -1117,7 +1135,12 @@ struct SprintMap: View {
                         RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .fill(activityColor(seconds: seconds, maximum: 3600))
                             .frame(maxWidth: .infinity, minHeight: 10, maxHeight: 10)
-                            .help(tooltip)
+                            .contentShape(Rectangle())
+                            .onHover { hovering in
+                                updateHover(id: "hour-\(start.timeIntervalSince1970)",
+                                            help: tooltip,
+                                            hovering: hovering)
+                            }
                             .accessibilityLabel(Text(tooltip))
                     }
                 }
@@ -1145,7 +1168,12 @@ struct SprintMap: View {
                         RoundedRectangle(cornerRadius: 3, style: .continuous)
                             .fill(activityColor(seconds: seconds, maximum: 8 * 3600))
                             .frame(width: 14, height: 14)
-                            .help(tooltip)
+                            .contentShape(Rectangle())
+                            .onHover { hovering in
+                                updateHover(id: "day-\(day.timeIntervalSince1970)",
+                                            help: tooltip,
+                                            hovering: hovering)
+                            }
                             .accessibilityLabel(Text(tooltip))
                     } else {
                         Color.clear.frame(width: 14, height: 14)
@@ -1159,6 +1187,16 @@ struct SprintMap: View {
         min(end.timeIntervalSince(start), sprints.reduce(0) { total, sprint in
             total + max(0, min(end, sprint.endedAt).timeIntervalSince(max(start, sprint.startedAt)))
         })
+    }
+
+    private func updateHover(id: String, help: String, hovering: Bool) {
+        if hovering {
+            hoveredBlockID = id
+            hoveredBlockHelp = help
+        } else if hoveredBlockID == id {
+            hoveredBlockID = nil
+            hoveredBlockHelp = nil
+        }
     }
 
     private func activityColor(seconds: TimeInterval, maximum: TimeInterval) -> Color {
