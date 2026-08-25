@@ -251,10 +251,10 @@ the CI/release workflows change on `main`, `.github/workflows/release.yml`:
 5. creates the tag at the exact triggering commit and publishes the assets when
    release write access is available.
 
-The workflow uses the repository token by default and supports a write-capable
-`RELEASE_TOKEN` secret when repository policy restricts that token. Publication
-failure must leave the verified artifact available and produce a workflow
-warning instead of failing the completed build.
+The workflow uses only the short-lived repository token. Do not add a personal
+release token; repository policy should grant the workflow contents write access.
+Publication failure must leave the verified artifact available and produce a
+workflow warning instead of failing the completed build.
 
 Do not manually tag routine patch releases. For an intentional major or minor
 release, set both `CFBundleVersion` and `CFBundleShortVersionString` in

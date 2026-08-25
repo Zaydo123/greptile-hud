@@ -22,7 +22,6 @@ jobs:
           plutil -lint Info.plist
           grep -q "actions/upload-artifact@v4" .github/workflows/release.yml
           grep -q "continue-on-error: true" .github/workflows/release.yml
-          grep -q "secrets.RELEASE_TOKEN" .github/workflows/release.yml
           test "$(bash scripts/next-version.sh 1.1.0 v1.1.0)" = "1.1.1"
           test "$(bash scripts/next-version.sh 1.2.0 v1.1.9)" = "1.2.0"
           if bash scripts/next-version.sh 1.0.0 v1.1.0; then exit 1; fi

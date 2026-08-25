@@ -233,11 +233,11 @@ When an app change reaches `main`, `.github/workflows/release.yml` automatically
 - creates the version tag and GitHub Release for the updater when release write
   access is available.
 
-The workflow uses its repository token by default. If repository policy blocks
-release publishing, configure a write-capable `RELEASE_TOKEN` secret. A denied
-publish is reported as a workflow warning rather than discarding an otherwise
-verified build; the automatic updater only sees builds that were successfully
-published as releases.
+The workflow uses only its short-lived repository token; no personal release
+token is required. If repository policy blocks release publishing, enable read
+and write workflow permissions in the repository settings. A denied publish is
+reported as a workflow warning rather than discarding an otherwise verified
+build; the automatic updater only sees builds successfully published as releases.
 
 Routine releases need no manual tagging. For an intentional major/minor release,
 update both version values in `Info.plist` before merging; CI continues patch
