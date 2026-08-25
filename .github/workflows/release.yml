@@ -29,7 +29,7 @@ jobs:
       - name: Choose next release version
         id: version
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
           BASE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
           LATEST_TAG="$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""')"
@@ -56,8 +56,30 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent GreptileHUD.app GreptileHUD.zip
           shasum -a 256 GreptileHUD.zip > GreptileHUD.zip.sha256
 
+      - name: Preserve downloadable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: GreptileHUD-${{ steps.version.outputs.version }}
+          path: |
+            GreptileHUD.zip
+            GreptileHUD.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Publish GitHub Release
+        id: publish
+        continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: gh release create "$TAG" GreptileHUD.zip GreptileHUD.zip.sha256 --target "$GITHUB_SHA" --generate-notes --fail-on-no-commits
+
+      - name: Report release permission fallback
+        if: steps.publish.outcome == 'failure'
+        run: |
+          echo "::warning::Release publishing was denied. The verified app remains available as this workflow run's artifact."
+          {
+            echo "## Release publishing needs repository write access"
+            echo "The verified app and checksum were preserved as a 30-day workflow artifact."
+            echo "Grant the workflow contents write access or configure a RELEASE_TOKEN secret to restore automatic updater releases."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -229,8 +229,15 @@ When an app change reaches `main`, `.github/workflows/release.yml` automatically
 
 - chooses the next patch version after the latest GitHub Release;
 - builds and validates the universal Intel/Apple Silicon app;
-- creates the version tag and GitHub Release; and
-- uploads `GreptileHUD.zip` and its checksum for the updater.
+- preserves `GreptileHUD.zip` and its checksum as a 30-day workflow artifact;
+- creates the version tag and GitHub Release for the updater when release write
+  access is available.
+
+The workflow uses its repository token by default. If repository policy blocks
+release publishing, configure a write-capable `RELEASE_TOKEN` secret. A denied
+publish is reported as a workflow warning rather than discarding an otherwise
+verified build; the automatic updater only sees builds that were successfully
+published as releases.
 
 Routine releases need no manual tagging. For an intentional major/minor release,
 update both version values in `Info.plist` before merging; CI continues patch

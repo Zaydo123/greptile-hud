@@ -247,8 +247,14 @@ the CI/release workflows change on `main`, `.github/workflows/release.yml`:
 2. chooses the next patch after the latest published release using
    `scripts/next-version.sh`;
 3. builds and validates the app;
-4. creates the tag at the exact triggering commit; and
-5. publishes the zip and checksum through GitHub Releases.
+4. preserves the zip and checksum as a 30-day workflow artifact; and
+5. creates the tag at the exact triggering commit and publishes the assets when
+   release write access is available.
+
+The workflow uses the repository token by default and supports a write-capable
+`RELEASE_TOKEN` secret when repository policy restricts that token. Publication
+failure must leave the verified artifact available and produce a workflow
+warning instead of failing the completed build.
 
 Do not manually tag routine patch releases. For an intentional major or minor
 release, set both `CFBundleVersion` and `CFBundleShortVersionString` in
