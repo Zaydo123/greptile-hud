@@ -406,7 +406,7 @@ struct HUDView: View {
                     Text(HUDClock.time.string(from: ctx.date))
                         .font(.system(size: 15, weight: .bold, design: .monospaced))
                         .monospacedDigit()
-                    Text("CURRENT")
+                    Text("CURRENT TIME")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
                 }
                 .foregroundStyle(Tokyo.cyan)
