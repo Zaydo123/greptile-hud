@@ -205,7 +205,10 @@ vibecoders integration with the `backend/` service:
   UserDefaults, cleared by "Forget username").
 - **Online now** — who's been active in the last 5 minutes, with today's
   devtime.
-- **Leaderboard** — today's devtime, refreshed every minute.
+- **Leaderboard and profiles** — Today, Week, and Month activity with visible
+  UTC date ranges, rankings, sprint maps, exact sprint rows, join dates, and
+  last-online times. Hovering a sprint-map block shows its active duration and
+  every overlapping sprint's exact boundaries. Data refreshes every minute.
 - **Devtime tracking** — while Cursor, VS Code, iTerm2, Terminal, Ghostty, etc.
   are running, the app sends a heartbeat every 60s so the backend accrues
   devtime (this replaces the standalone `backend/client/devtime.sh` agent if
