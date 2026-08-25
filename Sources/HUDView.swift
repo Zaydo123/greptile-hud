@@ -804,6 +804,9 @@ struct HUDView: View {
             if vibecoders.boardRefreshing {
                 IndeterminateBar(color: Tokyo.magenta)
             }
+            if let range = vibecoders.leaderboardPeriodRange {
+                periodRangeLabel(range, help: vibecoders.leaderboardPeriodDescription)
+            }
             if vibecoders.board.isEmpty {
                 Text("No devtime yet — open an editor and the minutes start stacking.")
                     .font(.system(size: 11)).foregroundStyle(Tokyo.comment)
@@ -919,6 +922,12 @@ struct HUDView: View {
                         Spinner(size: 11, color: Tokyo.magenta)
                     }
                 }
+                if let range = vcPeriodRange(start: profile.periodStart, end: profile.periodEnd) {
+                    periodRangeLabel(range,
+                                     help: vcExactPeriodDescription(profile.period.profileLabel,
+                                                                    start: profile.periodStart,
+                                                                    end: profile.periodEnd))
+                }
                 if vibecoders.profileLoading {
                     IndeterminateBar(color: Tokyo.magenta)
                 }
@@ -980,6 +989,15 @@ struct HUDView: View {
         .padding(2)
         .background(Tokyo.surface(1), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .help(vibecoders.leaderboardPeriodDescription)
+    }
+
+    private func periodRangeLabel(_ text: String, help: String) -> some View {
+        Label(text, systemImage: "calendar")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Tokyo.comment)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(help)
     }
 
     private func profileDetail(_ label: String, _ value: String, icon: String, tone: Color) -> some View {

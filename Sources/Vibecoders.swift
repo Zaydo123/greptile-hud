@@ -118,6 +118,26 @@ func vcDisplayName(_ name: String?) -> String? {
     return trimmed.isEmpty ? nil : trimmed
 }
 
+func vcPeriodRange(start: Date?, end: Date?, timezone: String = "UTC") -> String? {
+    guard let start, let end, end > start else { return nil }
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    formatter.timeZone = TimeZone(identifier: timezone) ?? TimeZone(secondsFromGMT: 0)
+    let first = formatter.string(from: start)
+    let last = formatter.string(from: end.addingTimeInterval(-1))
+    return first == last ? "\(first) · \(timezone)" : "\(first) – \(last) · \(timezone)"
+}
+
+func vcExactPeriodDescription(_ label: String, start: Date?, end: Date?, timezone: String = "UTC") -> String {
+    guard let start, let end else { return "\(label) is measured in \(timezone)." }
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .short
+    formatter.timeZone = TimeZone(identifier: timezone) ?? TimeZone(secondsFromGMT: 0)
+    return "\(label) starts at \(formatter.string(from: start)) and ends just before \(formatter.string(from: end)) \(timezone)."
+}
+
 // MARK: - Store
 
 @MainActor
@@ -154,13 +174,15 @@ final class VibecodersStore: NSObject, ObservableObject {
         return "Today is measured in \(todayTimezone) and resets at \(formatter.string(from: end)) in your local time."
     }
     var leaderboardPeriodDescription: String {
-        guard let start = leaderboardPeriodStart, let end = leaderboardPeriodEnd else {
-            return "\(leaderboardPeriod.profileLabel) is measured in UTC."
-        }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return "\(leaderboardPeriod.profileLabel) is measured in \(leaderboardTimezone): \(formatter.string(from: start)) through \(formatter.string(from: end.addingTimeInterval(-1)))."
+        vcExactPeriodDescription(leaderboardPeriod.profileLabel,
+                                 start: leaderboardPeriodStart,
+                                 end: leaderboardPeriodEnd,
+                                 timezone: leaderboardTimezone)
+    }
+    var leaderboardPeriodRange: String? {
+        vcPeriodRange(start: leaderboardPeriodStart,
+                      end: leaderboardPeriodEnd,
+                      timezone: leaderboardTimezone)
     }
 
     // MARK: Identity — trust-based, the user just picks a name
