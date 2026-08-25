@@ -153,3 +153,13 @@ func devtimeAll(ctx context.Context, db *sql.DB, userID int64) (int64, error) {
 		"SELECT COALESCE(SUM(seconds), 0) FROM devtime WHERE user_id = $1", userID).Scan(&seconds)
 	return seconds, err
 }
+
+func devtimeForPeriod(ctx context.Context, db *sql.DB, userID int64, period dayPeriod) (int64, error) {
+	var seconds int64
+	err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(seconds), 0)
+		FROM devtime
+		WHERE user_id = $1 AND day >= $2::date AND day < $3::date`,
+		userID, period.dateKey(), period.endDateKey()).Scan(&seconds)
+	return seconds, err
+}

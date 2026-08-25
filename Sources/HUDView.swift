@@ -798,12 +798,27 @@ struct HUDView: View {
             HStack(spacing: 8) {
                 sectionLabel("Leaderboard")
                 Spacer(minLength: 4)
-                Text("today · \(vibecoders.todayTimezone.lowercased())")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Tokyo.magenta)
-                    .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(Tokyo.magenta.opacity(0.14), in: Capsule())
-                    .help(vibecoders.todayPeriodDescription)
+                HStack(spacing: 2) {
+                    ForEach(VCLeaderboardPeriod.allCases) { period in
+                        Button {
+                            vibecoders.selectLeaderboardPeriod(period)
+                        } label: {
+                            Text(period.label)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(vibecoders.leaderboardPeriod == period ? Tokyo.magenta : Tokyo.comment)
+                                .padding(.horizontal, 8).padding(.vertical, 5)
+                                .background(vibecoders.leaderboardPeriod == period ? Tokyo.magenta.opacity(0.14) : Color.clear,
+                                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(2)
+                .background(Tokyo.surface(1), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .help(vibecoders.leaderboardPeriodDescription)
+            }
+            if vibecoders.boardRefreshing {
+                IndeterminateBar(color: Tokyo.magenta)
             }
             if vibecoders.board.isEmpty {
                 Text("No devtime yet — open an editor and the minutes start stacking.")
@@ -883,7 +898,7 @@ struct HUDView: View {
             }
 
             HStack(spacing: 10) {
-                profileMetric("Today", vcDuration(profile.devtimeToday), icon: "sun.max.fill")
+                profileMetric(profile.period.profileLabel, vcDuration(profile.devtimePeriod), icon: "calendar")
                 profileMetric("All time", vcDuration(profile.devtimeAll), icon: "clock.fill")
             }
 

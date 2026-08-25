@@ -20,9 +20,26 @@ struct VCUser: Codable, Equatable {
 
 struct VCCrewProfile: Equatable {
     var user: VCUser
-    var devtimeToday: Int64
+    var period: VCLeaderboardPeriod
+    var devtimePeriod: Int64
     var devtimeAll: Int64
     var online: Bool
+}
+
+enum VCLeaderboardPeriod: String, CaseIterable, Identifiable {
+    case today
+    case week
+    case month
+
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+    var profileLabel: String {
+        switch self {
+        case .today: return "Today"
+        case .week: return "This week"
+        case .month: return "This month"
+        }
+    }
 }
 
 struct VCOnlineUser: Codable, Equatable {
@@ -92,6 +109,11 @@ final class VibecodersStore: NSObject, ObservableObject {
     @Published private(set) var user: VCUser?
     @Published private(set) var online: [VCOnlineUser] = []
     @Published private(set) var board: [VCLeaderboardEntry] = []
+    @Published private(set) var leaderboardPeriod: VCLeaderboardPeriod = .today
+    @Published private(set) var leaderboardPeriodStart: Date?
+    @Published private(set) var leaderboardPeriodEnd: Date?
+    @Published private(set) var leaderboardTimezone = "UTC"
+    @Published private(set) var boardRefreshing = false
     @Published private(set) var devtimeToday: Int64 = 0
     @Published private(set) var todayPeriodEnd: Date?
     @Published private(set) var todayTimezone = "UTC"
@@ -112,6 +134,15 @@ final class VibecodersStore: NSObject, ObservableObject {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return "Today is measured in \(todayTimezone) and resets at \(formatter.string(from: end)) in your local time."
+    }
+    var leaderboardPeriodDescription: String {
+        guard let start = leaderboardPeriodStart, let end = leaderboardPeriodEnd else {
+            return "\(leaderboardPeriod.profileLabel) is measured in UTC."
+        }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return "\(leaderboardPeriod.profileLabel) is measured in \(leaderboardTimezone): \(formatter.string(from: start)) through \(formatter.string(from: end.addingTimeInterval(-1)))."
     }
 
     // MARK: Identity — trust-based, the user just picks a name
@@ -136,6 +167,9 @@ final class VibecodersStore: NSObject, ObservableObject {
         user = nil
         online = []
         board = []
+        leaderboardPeriod = .today
+        leaderboardPeriodStart = nil
+        leaderboardPeriodEnd = nil
         devtimeToday = 0
         todayPeriodEnd = nil
         dismissProfile()
@@ -148,6 +182,9 @@ final class VibecodersStore: NSObject, ObservableObject {
         user = nil
         online = []
         board = []
+        leaderboardPeriod = .today
+        leaderboardPeriodStart = nil
+        leaderboardPeriodEnd = nil
         devtimeToday = 0
         todayPeriodEnd = nil
         dismissProfile()
@@ -173,10 +210,15 @@ final class VibecodersStore: NSObject, ObservableObject {
 
     private func loadProfile(login: String) async {
         do {
-            let response: UserResp = try await get("/api/user", query: [URLQueryItem(name: "login", value: login)])
+            let requestedPeriod = leaderboardPeriod
+            let response: UserResp = try await get("/api/user", query: [
+                URLQueryItem(name: "login", value: login),
+                URLQueryItem(name: "period", value: requestedPeriod.rawValue)
+            ])
             guard selectedProfileLogin == login else { return }
             crewProfile = VCCrewProfile(user: response.user,
-                                        devtimeToday: response.devtimeToday,
+                                        period: VCLeaderboardPeriod(rawValue: response.period ?? "") ?? requestedPeriod,
+                                        devtimePeriod: response.devtimePeriod ?? response.devtimeToday,
                                         devtimeAll: response.devtimeAll ?? response.devtimeToday,
                                         online: response.online ?? false)
             profileLoading = false
@@ -189,8 +231,15 @@ final class VibecodersStore: NSObject, ObservableObject {
 
     // MARK: Refresh
 
+    func selectLeaderboardPeriod(_ period: VCLeaderboardPeriod) {
+        guard leaderboardPeriod != period else { return }
+        leaderboardPeriod = period
+        Task { await refreshLeaderboard() }
+    }
+
     func refresh() async {
         guard hasUsername else { return }
+        errorText = nil
         do {
             let me: UserResp = try await get("/api/user", query: [URLQueryItem(name: "login", value: username)])
             user = me.user
@@ -198,15 +247,34 @@ final class VibecodersStore: NSObject, ObservableObject {
             updatePeriod(end: me.periodEnd, timezone: me.timezone)
             let onl: OnlineResp = try await get("/api/online")
             online = onl.online
-            let lb: LeaderboardResp = try await get("/api/leaderboard",
-                                                    query: [URLQueryItem(name: "period", value: "today")])
-            board = lb.entries
-            updatePeriod(end: lb.periodEnd, timezone: lb.timezone)
+            await refreshLeaderboard()
             lastRefresh = Date()
-            errorText = nil
         } catch VCError.notFound {
             // fresh name, nothing recorded yet — fine
         } catch {
+            errorText = vcFriendly(error)
+        }
+    }
+
+    private func refreshLeaderboard() async {
+        let requestedPeriod = leaderboardPeriod
+        boardRefreshing = true
+        do {
+            let response: LeaderboardResp = try await get("/api/leaderboard", query: [
+                URLQueryItem(name: "period", value: requestedPeriod.rawValue)
+            ])
+            guard leaderboardPeriod == requestedPeriod else { return }
+            board = response.entries
+            leaderboardPeriodStart = response.periodStart
+            leaderboardPeriodEnd = response.periodEnd
+            if let timezone = response.timezone, !timezone.isEmpty {
+                leaderboardTimezone = timezone
+            }
+            boardRefreshing = false
+            errorText = nil
+        } catch {
+            guard leaderboardPeriod == requestedPeriod else { return }
+            boardRefreshing = false
             errorText = vcFriendly(error)
         }
     }
@@ -249,23 +317,28 @@ final class VibecodersStore: NSObject, ObservableObject {
         var user: VCUser
         var devtimeToday: Int64
         var devtimeAll: Int64?
+        var devtimePeriod: Int64?
+        var period: String?
         var online: Bool?
         var periodEnd: Date?
         var timezone: String?
         enum CodingKeys: String, CodingKey {
-            case user, online, timezone
+            case user, online, period, timezone
             case devtimeToday = "devtime_today"
             case devtimeAll = "devtime_all"
+            case devtimePeriod = "devtime_period"
             case periodEnd = "period_end"
         }
     }
     private struct OnlineResp: Decodable { var online: [VCOnlineUser] }
     private struct LeaderboardResp: Decodable {
         var entries: [VCLeaderboardEntry]
+        var periodStart: Date?
         var periodEnd: Date?
         var timezone: String?
         enum CodingKeys: String, CodingKey {
             case entries, timezone
+            case periodStart = "period_start"
             case periodEnd = "period_end"
         }
     }
