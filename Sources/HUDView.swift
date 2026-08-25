@@ -1041,7 +1041,6 @@ struct SprintMap: View {
     let periodEnd: Date?
 
     @State private var hoveredBlockID: String?
-    @State private var hoveredBlockHelp: String?
 
     private static var utcCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
@@ -1091,25 +1090,6 @@ struct SprintMap: View {
         .padding(10)
         .background(Tokyo.bgDark.opacity(0.55), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Tokyo.stroke()))
-        .overlay(alignment: .topTrailing) {
-            if let hoveredBlockHelp {
-                Text(hoveredBlockHelp)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Tokyo.fg)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 260, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Tokyo.bg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(Tokyo.magenta.opacity(0.55)))
-                    .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
-                    .padding(7)
-                    .allowsHitTesting(false)
-                    .zIndex(10)
-            }
-        }
     }
 
     private var hourlyGrid: some View {
@@ -1132,16 +1112,21 @@ struct SprintMap: View {
                         let next = Self.utcCalendar.date(byAdding: .hour, value: 1, to: start)!
                         let seconds = activeSeconds(from: start, to: next)
                         let tooltip = activityHelp(from: start, to: next)
+                        let blockID = "hour-\(start.timeIntervalSince1970)"
                         RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .fill(activityColor(seconds: seconds, maximum: 3600))
                             .frame(maxWidth: .infinity, minHeight: 10, maxHeight: 10)
                             .contentShape(Rectangle())
+                            .overlay(alignment: hour >= 12 ? .bottomTrailing : .bottomLeading) {
+                                if hoveredBlockID == blockID {
+                                    offsetHoverCard(tooltip)
+                                }
+                            }
                             .onHover { hovering in
-                                updateHover(id: "hour-\(start.timeIntervalSince1970)",
-                                            help: tooltip,
-                                            hovering: hovering)
+                                updateHover(id: blockID, hovering: hovering)
                             }
                             .accessibilityLabel(Text(tooltip))
+                            .zIndex(hoveredBlockID == blockID ? 20 : 0)
                     }
                 }
             }
@@ -1160,21 +1145,26 @@ struct SprintMap: View {
                 }
             }
             LazyVGrid(columns: columns, alignment: .leading, spacing: 5) {
-                ForEach(Array(cells.enumerated()), id: \.offset) { _, day in
+                ForEach(Array(cells.enumerated()), id: \.offset) { index, day in
                     if let day {
                         let next = Self.utcCalendar.date(byAdding: .day, value: 1, to: day)!
                         let seconds = activeSeconds(from: day, to: next)
                         let tooltip = activityHelp(from: day, to: next)
+                        let blockID = "day-\(day.timeIntervalSince1970)"
                         RoundedRectangle(cornerRadius: 3, style: .continuous)
                             .fill(activityColor(seconds: seconds, maximum: 8 * 3600))
                             .frame(width: 14, height: 14)
                             .contentShape(Rectangle())
+                            .overlay(alignment: index % 7 >= 4 ? .bottomTrailing : .bottomLeading) {
+                                if hoveredBlockID == blockID {
+                                    offsetHoverCard(tooltip)
+                                }
+                            }
                             .onHover { hovering in
-                                updateHover(id: "day-\(day.timeIntervalSince1970)",
-                                            help: tooltip,
-                                            hovering: hovering)
+                                updateHover(id: blockID, hovering: hovering)
                             }
                             .accessibilityLabel(Text(tooltip))
+                            .zIndex(hoveredBlockID == blockID ? 20 : 0)
                     } else {
                         Color.clear.frame(width: 14, height: 14)
                     }
@@ -1189,14 +1179,32 @@ struct SprintMap: View {
         })
     }
 
-    private func updateHover(id: String, help: String, hovering: Bool) {
+    private func updateHover(id: String, hovering: Bool) {
         if hovering {
             hoveredBlockID = id
-            hoveredBlockHelp = help
         } else if hoveredBlockID == id {
             hoveredBlockID = nil
-            hoveredBlockHelp = nil
         }
+    }
+
+    private func offsetHoverCard(_ help: String) -> some View {
+        VStack(spacing: 0) {
+            Text(help)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Tokyo.fg)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 230, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Tokyo.bg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(Tokyo.magenta.opacity(0.55)))
+                .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+            Color.clear.frame(width: 1, height: 18)
+        }
+        .fixedSize()
+        .allowsHitTesting(false)
     }
 
     private func activityColor(seconds: TimeInterval, maximum: TimeInterval) -> Color {
@@ -1206,6 +1214,7 @@ struct SprintMap: View {
     }
 
     private func activityHelp(from start: Date, to end: Date) -> String {
+        let previewLimit = 3
         let matching = sprints
             .filter { $0.startedAt < end && $0.endedAt > start }
             .sorted { $0.startedAt < $1.startedAt }
@@ -1216,11 +1225,15 @@ struct SprintMap: View {
         guard !matching.isEmpty else {
             return "\(block)\nNo sprint activity"
         }
-        let sprintLines = matching.map { sprint in
+        let sprintLines = matching.prefix(previewLimit).map { sprint in
             let active = sprint.active ? " · active" : ""
             return "\(sprintRangeLabel(sprint)) · \(vcDuration(sprint.durationSeconds))\(active)"
         }
-        return (["\(block)\n\(total) active", "Sprints:"] + sprintLines).joined(separator: "\n")
+        let countLabel = matching.count == 1 ? "1 sprint" : "\(matching.count) sprints"
+        let remaining = matching.count - sprintLines.count
+        let overflow = remaining > 0 ? ["+\(remaining) more · see full sprint list below"] : []
+        return (["\(block)\n\(total) active · \(countLabel)"] + sprintLines + overflow)
+            .joined(separator: "\n")
     }
 
     private func sprintRangeLabel(_ sprint: VCSprint) -> String {
