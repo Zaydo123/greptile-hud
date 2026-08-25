@@ -39,17 +39,14 @@ type leaderboardEntry struct {
 
 // handleLeaderboard returns the devtime leaderboard:
 //
-//	GET /api/leaderboard?period=today|all
+//	GET /api/leaderboard?period=today|week|month|all
 //
-// "today" is the default; "all" sums every recorded day.
+// "today" is the default. Calendar periods use shared UTC boundaries.
 func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
-	period := r.URL.Query().Get("period")
-	if period != "all" {
-		period = "today"
-	}
+	period, window := utcActivityPeriod(time.Now(), r.URL.Query().Get("period"))
 	var rows *sql.Rows
 	var err error
-	if period == "all" {
+	if period == periodAll {
 		rows, err = s.db.QueryContext(r.Context(), `
 			SELECT u.login, u.name, u.last_seen, COALESCE(SUM(d.seconds), 0) AS value
 			FROM users u
@@ -59,11 +56,13 @@ func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 			LIMIT 100`)
 	} else {
 		rows, err = s.db.QueryContext(r.Context(), `
-			SELECT u.login, u.name, u.last_seen, COALESCE(d.seconds, 0) AS value
+			SELECT u.login, u.name, u.last_seen, COALESCE(SUM(d.seconds), 0) AS value
 			FROM users u
-			LEFT JOIN devtime d ON d.user_id = u.id AND d.day = CURRENT_DATE
+			LEFT JOIN devtime d ON d.user_id = u.id
+				AND d.day >= $1::date AND d.day < $2::date
+			GROUP BY u.id
 			ORDER BY value DESC, u.login
-			LIMIT 100`)
+			LIMIT 100`, window.dateKey(), window.endDateKey())
 	}
 	if err != nil {
 		logf("leaderboard: %v", err)
@@ -90,22 +89,27 @@ func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 		out = append(out, e)
 		rank++
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"metric":  "devtime",
 		"period":  period,
 		"updated": time.Now().UTC(),
 		"entries": out,
-	})
+	}
+	if period != periodAll {
+		addDayPeriod(response, window)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // handleOnline lists currently online users (heartbeat within the window).
 func (s *server) handleOnline(w http.ResponseWriter, r *http.Request) {
+	day := currentDayPeriod()
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT login, name, last_seen,
-			COALESCE((SELECT seconds FROM devtime WHERE user_id = users.id AND day = CURRENT_DATE), 0)
+			COALESCE((SELECT seconds FROM devtime WHERE user_id = users.id AND day = $1::date), 0)
 		FROM users
 		WHERE last_seen IS NOT NULL AND last_seen > now() - interval '5 minutes'
-		ORDER BY last_seen DESC`)
+		ORDER BY last_seen DESC`, day.dateKey())
 	if err != nil {
 		logf("online: %v", err)
 		httpError(w, http.StatusInternalServerError, "online query failed")
@@ -141,6 +145,9 @@ func (s *server) handleOnline(w http.ResponseWriter, r *http.Request) {
 //
 // Everything is public; there is no auth.
 func (s *server) handleUser(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	day := utcDayPeriod(now)
+	selectedPeriod, selectedWindow := utcActivityPeriod(now, r.URL.Query().Get("period"))
 	login := normalizeLogin(r.URL.Query().Get("login"))
 	if login == "" {
 		httpError(w, http.StatusBadRequest, "missing or invalid login")
@@ -152,13 +159,37 @@ func (s *server) handleUser(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "user lookup failed")
 		return
 	}
-	today, err := devtimeToday(r.Context(), s.db, u.ID)
+	today, err := devtimeToday(r.Context(), s.db, u.ID, day.dateKey())
 	if err != nil {
 		logf("user devtime: %v", err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"user":          u,
-		"devtime_today": today,
-		"online":        isOnline(u),
-	})
+	all, err := devtimeAll(r.Context(), s.db, u.ID)
+	if err != nil {
+		logf("user all-time devtime: %v", err)
+	}
+	periodValue := all
+	if selectedPeriod != periodAll {
+		periodValue, err = devtimeForPeriod(r.Context(), s.db, u.ID, selectedWindow)
+		if err != nil {
+			logf("user %s devtime: %v", selectedPeriod, err)
+		}
+	}
+	sprints, err := listSprints(r.Context(), s.db, u.ID, selectedPeriod, selectedWindow)
+	if err != nil {
+		logf("user sprints: %v", err)
+		sprints = []Sprint{}
+	}
+	response := map[string]any{
+		"user":           u,
+		"devtime_today":  today,
+		"devtime_all":    all,
+		"devtime_period": periodValue,
+		"period":         selectedPeriod,
+		"online":         isOnline(u),
+		"sprints":        sprints,
+	}
+	if selectedPeriod != periodAll {
+		addDayPeriod(response, selectedWindow)
+	}
+	writeJSON(w, http.StatusOK, response)
 }

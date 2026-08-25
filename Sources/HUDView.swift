@@ -701,14 +701,18 @@ struct HUDView: View {
             VStack(spacing: 0) {
                 crewHeader
                 Rectangle().fill(Tokyo.line).frame(height: 1)
-                ScrollView {
-                    VStack(spacing: 14) {
-                        onlineStrip
-                        leaderboardBlock
+                if vibecoders.selectedProfileLogin != nil {
+                    crewProfileContent
+                } else {
+                    ScrollView {
+                        VStack(spacing: 14) {
+                            onlineStrip
+                            leaderboardBlock
+                        }
+                        .padding(12)
                     }
-                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -737,6 +741,7 @@ struct HUDView: View {
             }
             .padding(.horizontal, 9).padding(.vertical, 5)
             .background(Tokyo.magenta.opacity(0.14), in: Capsule())
+            .help(vibecoders.todayPeriodDescription)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
@@ -757,19 +762,26 @@ struct HUDView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(vibecoders.online, id: \.login) { u in
-                            HStack(spacing: 7) {
-                                Circle().fill(Tokyo.green).frame(width: 7, height: 7)
-                                Text(vcDisplayName(u.name) ?? u.login)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .lineLimit(1).truncationMode(.tail)
-                                Text(vcDuration(u.devtimeToday))
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(Tokyo.comment).monospacedDigit()
+                            Button {
+                                vibecoders.showProfile(login: u.login)
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Circle().fill(Tokyo.green).frame(width: 7, height: 7)
+                                    Text(vcDisplayName(u.name) ?? u.login)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .lineLimit(1).truncationMode(.tail)
+                                    Text(vcDuration(u.devtimeToday))
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(Tokyo.comment).monospacedDigit()
+                                }
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .frame(minHeight: 32)
+                                .background(Tokyo.surface(1),
+                                            in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                .contentShape(Rectangle())
                             }
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .frame(minHeight: 32)
-                            .background(Tokyo.surface(1),
-                                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .buttonStyle(.plain)
+                            .help("View @\(u.login)'s profile")
                         }
                     }
                 }
@@ -786,11 +798,10 @@ struct HUDView: View {
             HStack(spacing: 8) {
                 sectionLabel("Leaderboard")
                 Spacer(minLength: 4)
-                Text("today")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Tokyo.magenta)
-                    .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(Tokyo.magenta.opacity(0.14), in: Capsule())
+                crewPeriodPicker
+            }
+            if vibecoders.boardRefreshing {
+                IndeterminateBar(color: Tokyo.magenta)
             }
             if vibecoders.board.isEmpty {
                 Text("No devtime yet — open an editor and the minutes start stacking.")
@@ -799,7 +810,7 @@ struct HUDView: View {
             } else {
                 VStack(spacing: 6) {
                     ForEach(vibecoders.board.prefix(10), id: \.login) { e in
-                        CrewRow(entry: e)
+                        CrewRow(entry: e) { vibecoders.showProfile(login: e.login) }
                     }
                 }
             }
@@ -819,6 +830,350 @@ struct HUDView: View {
             .textCase(.uppercase)
             .foregroundStyle(Tokyo.comment)
             .kerning(1.2)
+    }
+
+    @ViewBuilder private var crewProfileContent: some View {
+        if let profile = vibecoders.crewProfile {
+            ScrollView {
+                crewProfileCard(profile)
+                    .padding(16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if vibecoders.profileLoading {
+            VStack(spacing: 12) {
+                Spinner(size: 18, color: Tokyo.magenta)
+                Text("Loading profile…")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokyo.fgDim)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(spacing: 12) {
+                Text(vibecoders.profileError ?? "Couldn’t load this profile")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokyo.orange)
+                Button("Back") { vibecoders.dismissProfile() }
+                    .buttonStyle(.plain).foregroundStyle(Tokyo.magenta)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func crewProfileCard(_ profile: VCCrewProfile) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Text(String(profile.user.login.prefix(1)).uppercased())
+                    .font(.system(size: 18, weight: .bold)).foregroundStyle(Tokyo.magenta)
+                    .frame(width: 42, height: 42)
+                    .background(Tokyo.magenta.opacity(0.16), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(vcDisplayName(profile.user.name) ?? profile.user.login)
+                        .font(.system(size: 16, weight: .bold))
+                    Text("@\(profile.user.login)")
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(Tokyo.comment)
+                }
+                Spacer()
+                Button { vibecoders.dismissProfile() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold)).foregroundStyle(Tokyo.fgDim)
+                        .frame(width: 30, height: 30)
+                        .background(Tokyo.surface(1), in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain).help("Back to Crew")
+            }
+
+            HStack(spacing: 10) {
+                profileMetric(profile.period.profileLabel, vcDuration(profile.devtimePeriod), icon: "calendar")
+                profileMetric("All time", vcDuration(profile.devtimeAll), icon: "clock.fill")
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                profileDetail("Status", profile.online ? "Online now" : "Offline",
+                              icon: profile.online ? "circle.fill" : "moon.fill",
+                              tone: profile.online ? Tokyo.green : Tokyo.comment)
+                if let lastSeen = profile.user.lastSeen {
+                    profileDetail("Last online", lastSeen.formatted(date: .abbreviated, time: .shortened),
+                                  icon: "clock.arrow.circlepath", tone: Tokyo.cyan)
+                }
+                if let joined = profile.user.createdAt {
+                    profileDetail("Joined", joined.formatted(date: .long, time: .omitted),
+                                  icon: "calendar", tone: Tokyo.magenta)
+                }
+            }
+            .padding(14)
+            .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Tokyo.stroke()))
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    sectionLabel("Sprints")
+                    Spacer()
+                    Text("\(profile.sprints.count)")
+                        .font(.system(size: 10, weight: .bold)).monospacedDigit()
+                        .foregroundStyle(Tokyo.magenta)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Tokyo.magenta.opacity(0.14), in: Capsule())
+                }
+                HStack(spacing: 8) {
+                    crewPeriodPicker
+                    if vibecoders.profileLoading {
+                        Spinner(size: 11, color: Tokyo.magenta)
+                    }
+                }
+                if vibecoders.profileLoading {
+                    IndeterminateBar(color: Tokyo.magenta)
+                }
+                SprintMap(period: profile.period,
+                          sprints: profile.sprints,
+                          periodStart: profile.periodStart,
+                          periodEnd: profile.periodEnd)
+                if profile.sprints.isEmpty {
+                    Text("No sprint history for this period yet. Sessions begin appearing after the first activity heartbeat.")
+                        .font(.system(size: 11)).foregroundStyle(Tokyo.comment)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 12)
+                } else {
+                    VStack(spacing: 6) {
+                        ForEach(profile.sprints) { sprint in
+                            sprintRow(sprint)
+                        }
+                    }
+                }
+            }
+            .padding(14)
+            .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Tokyo.stroke()))
+        }
+        .padding(16)
+        .background(Tokyo.bgDark.opacity(0.75), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Tokyo.stroke(true)))
+    }
+
+    private func profileMetric(_ label: String, _ value: String, icon: String) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokyo.magenta)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.comment)
+                Text(value).font(.system(size: 15, weight: .bold)).monospacedDigit()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12).frame(maxWidth: .infinity)
+        .background(Tokyo.magenta.opacity(0.10), in: RoundedRectangle(cornerRadius: 11))
+    }
+
+    private var crewPeriodPicker: some View {
+        HStack(spacing: 2) {
+            ForEach(VCLeaderboardPeriod.allCases) { period in
+                Button {
+                    vibecoders.selectLeaderboardPeriod(period)
+                } label: {
+                    Text(period.label)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(vibecoders.leaderboardPeriod == period ? Tokyo.magenta : Tokyo.comment)
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(vibecoders.leaderboardPeriod == period ? Tokyo.magenta.opacity(0.14) : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(Tokyo.surface(1), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .help(vibecoders.leaderboardPeriodDescription)
+    }
+
+    private func profileDetail(_ label: String, _ value: String, icon: String, tone: Color) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(tone).frame(width: 16)
+            Text(label).font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokyo.comment)
+            Spacer()
+            Text(value).font(.system(size: 11, weight: .semibold)).monospacedDigit()
+        }
+    }
+
+    private func sprintRow(_ sprint: VCSprint) -> some View {
+        HStack(spacing: 10) {
+            VStack(spacing: 2) {
+                Circle()
+                    .fill(sprint.active ? Tokyo.green : Tokyo.magenta)
+                    .frame(width: 8, height: 8)
+                Capsule().fill(Tokyo.line).frame(width: 2, height: 24)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(sprint.startedAt.formatted(date: .abbreviated, time: .omitted))
+                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(Tokyo.comment)
+                Text("\(sprint.startedAt.formatted(date: .omitted, time: .shortened)) – \(sprintEndLabel(sprint))")
+                    .font(.system(size: 12, weight: .semibold)).monospacedDigit()
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(vcDuration(sprint.durationSeconds))
+                    .font(.system(size: 12, weight: .bold)).monospacedDigit()
+                    .foregroundStyle(Tokyo.magenta)
+                if sprint.active {
+                    Text("ACTIVE")
+                        .font(.system(size: 8, weight: .bold)).foregroundStyle(Tokyo.green)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 44)
+        .background(Tokyo.surface(1), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private func sprintEndLabel(_ sprint: VCSprint) -> String {
+        if Calendar.current.isDate(sprint.startedAt, inSameDayAs: sprint.endedAt) {
+            return sprint.endedAt.formatted(date: .omitted, time: .shortened)
+        }
+        return sprint.endedAt.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+// MARK: - Sprint activity map (UTC, matching Crew period boundaries)
+
+struct SprintMap: View {
+    let period: VCLeaderboardPeriod
+    let sprints: [VCSprint]
+    let periodStart: Date?
+    let periodEnd: Date?
+
+    private static var utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }()
+
+    private var bounds: (start: Date, end: Date) {
+        let calendar = Self.utcCalendar
+        let fallbackStart = calendar.startOfDay(for: Date())
+        let start = periodStart ?? fallbackStart
+        let fallbackEnd: Date
+        switch period {
+        case .today: fallbackEnd = calendar.date(byAdding: .day, value: 1, to: start)!
+        case .week: fallbackEnd = calendar.date(byAdding: .day, value: 7, to: start)!
+        case .month: fallbackEnd = calendar.date(byAdding: .month, value: 1, to: start)!
+        }
+        return (start, periodEnd ?? fallbackEnd)
+    }
+
+    private var days: [Date] {
+        var result: [Date] = []
+        var day = bounds.start
+        while day < bounds.end, result.count < 31 {
+            result.append(day)
+            day = Self.utcCalendar.date(byAdding: .day, value: 1, to: day)!
+        }
+        return result
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(period == .month ? "DAILY ACTIVITY" : "HOURLY ACTIVITY")
+                    .font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.comment)
+                    .kerning(0.8)
+                Spacer()
+                Text("UTC")
+                    .font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.comment)
+            }
+            if period == .month {
+                monthGrid
+            } else {
+                hourlyGrid
+            }
+        }
+        .padding(10)
+        .background(Tokyo.bgDark.opacity(0.55), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Tokyo.stroke()))
+    }
+
+    private var hourlyGrid: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 3) {
+                Color.clear.frame(width: 34, height: 1)
+                Text("00").frame(maxWidth: .infinity, alignment: .leading)
+                Text("06").frame(maxWidth: .infinity)
+                Text("12").frame(maxWidth: .infinity)
+                Text("18").frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .font(.system(size: 8, weight: .medium)).foregroundStyle(Tokyo.comment)
+            ForEach(days, id: \.self) { day in
+                HStack(spacing: 3) {
+                    Text(dayLabel(day))
+                        .font(.system(size: 9, weight: .semibold)).foregroundStyle(Tokyo.comment)
+                        .frame(width: 34, alignment: .leading)
+                    ForEach(0..<24, id: \.self) { hour in
+                        let start = Self.utcCalendar.date(byAdding: .hour, value: hour, to: day)!
+                        let seconds = activeSeconds(from: start,
+                                                    to: Self.utcCalendar.date(byAdding: .hour, value: 1, to: start)!)
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(activityColor(seconds: seconds, maximum: 3600))
+                            .frame(maxWidth: .infinity, minHeight: 10, maxHeight: 10)
+                            .help("\(hourLabel(start)): \(vcDuration(Int64(seconds))) active")
+                    }
+                }
+            }
+        }
+    }
+
+    private var monthGrid: some View {
+        let leading = max(0, Self.utcCalendar.component(.weekday, from: bounds.start) - 1)
+        let cells = Array(repeating: Optional<Date>.none, count: leading) + days.map(Optional.some)
+        let columns = Array(repeating: GridItem(.fixed(14), spacing: 5), count: 7)
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                ForEach(Array(["S", "M", "T", "W", "T", "F", "S"].enumerated()), id: \.offset) { _, label in
+                    Text(label).font(.system(size: 8, weight: .semibold)).foregroundStyle(Tokyo.comment)
+                        .frame(width: 14)
+                }
+            }
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 5) {
+                ForEach(Array(cells.enumerated()), id: \.offset) { _, day in
+                    if let day {
+                        let next = Self.utcCalendar.date(byAdding: .day, value: 1, to: day)!
+                        let seconds = activeSeconds(from: day, to: next)
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .fill(activityColor(seconds: seconds, maximum: 8 * 3600))
+                            .frame(width: 14, height: 14)
+                            .help("\(fullDayLabel(day)): \(vcDuration(Int64(seconds))) active")
+                    } else {
+                        Color.clear.frame(width: 14, height: 14)
+                    }
+                }
+            }
+        }
+    }
+
+    private func activeSeconds(from start: Date, to end: Date) -> TimeInterval {
+        min(end.timeIntervalSince(start), sprints.reduce(0) { total, sprint in
+            total + max(0, min(end, sprint.endedAt).timeIntervalSince(max(start, sprint.startedAt)))
+        })
+    }
+
+    private func activityColor(seconds: TimeInterval, maximum: TimeInterval) -> Color {
+        guard seconds > 0 else { return Tokyo.surface(1) }
+        let intensity = min(1, seconds / maximum)
+        return Tokyo.magenta.opacity(0.22 + intensity * 0.70)
+    }
+
+    private func dayLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = period == .today ? "MMM d" : "EEE"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
+
+    private func fullDayLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
+
+    private func hourLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, HH:mm 'UTC'"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
     }
 }
 
@@ -1892,6 +2247,7 @@ struct RunRow: View {
 
 struct CrewRow: View {
     let entry: VCLeaderboardEntry
+    var onSelect: () -> Void = {}
     @State private var hovered = false
 
     private var rankColor: Color {
@@ -1904,36 +2260,39 @@ struct CrewRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text("\(entry.rank)")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(rankColor)
-                .frame(width: 22)
-            Text(String(entry.login.prefix(1)).uppercased())
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Tokyo.magenta)
-                .frame(width: 24, height: 24)
-                .background(Tokyo.magenta.opacity(0.15), in: Circle())
-            Text(vcDisplayName(entry.name) ?? entry.login)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-            if entry.online {
-                Circle().fill(Tokyo.green).frame(width: 7, height: 7)
-                    .shadow(color: Tokyo.green, radius: 3)
-                    .help("Online now")
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                Text("\(entry.rank)")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(rankColor)
+                    .frame(width: 22)
+                Text(String(entry.login.prefix(1)).uppercased())
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Tokyo.magenta)
+                    .frame(width: 24, height: 24)
+                    .background(Tokyo.magenta.opacity(0.15), in: Circle())
+                Text(vcDisplayName(entry.name) ?? entry.login)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                if entry.online {
+                    Circle().fill(Tokyo.green).frame(width: 7, height: 7)
+                        .shadow(color: Tokyo.green, radius: 3)
+                        .help("Online now")
+                }
+                Spacer(minLength: 6)
+                Text(vcDuration(entry.value))
+                    .font(.system(size: 13, weight: .bold)).monospacedDigit()
+                    .foregroundStyle(Tokyo.magenta)
             }
-            Spacer(minLength: 6)
-            Text(vcDuration(entry.value))
-                .font(.system(size: 13, weight: .bold)).monospacedDigit()
-                .foregroundStyle(Tokyo.magenta)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 40)
+            .background(Tokyo.surface(hovered ? 1 : 0),
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 40)
-        .background(Tokyo.surface(hovered ? 1 : 0),
-                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .help("@\(entry.login) · devtime: \(vcDuration(entry.value))")
+        .help("View @\(entry.login)'s profile")
     }
 }
 

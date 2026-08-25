@@ -29,19 +29,21 @@ func (s *server) handlePulse(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "could not record pulse")
 		return
 	}
-	if err := pulse(r.Context(), s.db, u.ID); err != nil {
+	now := time.Now().UTC()
+	period := utcDayPeriod(now)
+	if err := pulse(r.Context(), s.db, u.ID, period.dateKey(), now); err != nil {
 		logf("pulse: %s: %v", login, err)
 		httpError(w, http.StatusInternalServerError, "could not record pulse")
 		return
 	}
-	seconds, err := devtimeToday(r.Context(), s.db, u.ID)
+	seconds, err := devtimeToday(r.Context(), s.db, u.ID, period.dateKey())
 	if err != nil {
 		logf("pulse: %s: devtime read: %v", login, err)
 		seconds = 0
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, http.StatusOK, addDayPeriod(map[string]any{
 		"ok":            true,
 		"devtime_today": seconds,
-		"last_seen":     time.Now().UTC(),
-	})
+		"last_seen":     now,
+	}, period))
 }
