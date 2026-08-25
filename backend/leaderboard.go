@@ -43,6 +43,7 @@ type leaderboardEntry struct {
 //
 // "today" is the default; "all" sums every recorded day.
 func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
+	day := currentDayPeriod()
 	period := r.URL.Query().Get("period")
 	if period != "all" {
 		period = "today"
@@ -61,9 +62,9 @@ func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 		rows, err = s.db.QueryContext(r.Context(), `
 			SELECT u.login, u.name, u.last_seen, COALESCE(d.seconds, 0) AS value
 			FROM users u
-			LEFT JOIN devtime d ON d.user_id = u.id AND d.day = CURRENT_DATE
+			LEFT JOIN devtime d ON d.user_id = u.id AND d.day = $1::date
 			ORDER BY value DESC, u.login
-			LIMIT 100`)
+			LIMIT 100`, day.dateKey())
 	}
 	if err != nil {
 		logf("leaderboard: %v", err)
@@ -90,22 +91,27 @@ func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 		out = append(out, e)
 		rank++
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"metric":  "devtime",
 		"period":  period,
 		"updated": time.Now().UTC(),
 		"entries": out,
-	})
+	}
+	if period == "today" {
+		addDayPeriod(response, day)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // handleOnline lists currently online users (heartbeat within the window).
 func (s *server) handleOnline(w http.ResponseWriter, r *http.Request) {
+	day := currentDayPeriod()
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT login, name, last_seen,
-			COALESCE((SELECT seconds FROM devtime WHERE user_id = users.id AND day = CURRENT_DATE), 0)
+			COALESCE((SELECT seconds FROM devtime WHERE user_id = users.id AND day = $1::date), 0)
 		FROM users
 		WHERE last_seen IS NOT NULL AND last_seen > now() - interval '5 minutes'
-		ORDER BY last_seen DESC`)
+		ORDER BY last_seen DESC`, day.dateKey())
 	if err != nil {
 		logf("online: %v", err)
 		httpError(w, http.StatusInternalServerError, "online query failed")
@@ -141,6 +147,7 @@ func (s *server) handleOnline(w http.ResponseWriter, r *http.Request) {
 //
 // Everything is public; there is no auth.
 func (s *server) handleUser(w http.ResponseWriter, r *http.Request) {
+	period := currentDayPeriod()
 	login := normalizeLogin(r.URL.Query().Get("login"))
 	if login == "" {
 		httpError(w, http.StatusBadRequest, "missing or invalid login")
@@ -152,13 +159,13 @@ func (s *server) handleUser(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "user lookup failed")
 		return
 	}
-	today, err := devtimeToday(r.Context(), s.db, u.ID)
+	today, err := devtimeToday(r.Context(), s.db, u.ID, period.dateKey())
 	if err != nil {
 		logf("user devtime: %v", err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, http.StatusOK, addDayPeriod(map[string]any{
 		"user":          u,
 		"devtime_today": today,
 		"online":        isOnline(u),
-	})
+	}, period))
 }

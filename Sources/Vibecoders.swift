@@ -84,6 +84,8 @@ final class VibecodersStore: NSObject, ObservableObject {
     @Published private(set) var online: [VCOnlineUser] = []
     @Published private(set) var board: [VCLeaderboardEntry] = []
     @Published private(set) var devtimeToday: Int64 = 0
+    @Published private(set) var todayPeriodEnd: Date?
+    @Published private(set) var todayTimezone = "UTC"
     @Published private(set) var lastRefresh: Date?
     @Published var errorText: String?
 
@@ -91,6 +93,13 @@ final class VibecodersStore: NSObject, ObservableObject {
 
     var username: String { UserDefaults.standard.string(forKey: Self.usernameKey) ?? "" }
     var hasUsername: Bool { !username.isEmpty }
+    var todayPeriodDescription: String {
+        guard let end = todayPeriodEnd else { return "Today is measured in UTC." }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return "Today is measured in \(todayTimezone) and resets at \(formatter.string(from: end)) in your local time."
+    }
 
     // MARK: Identity — trust-based, the user just picks a name
 
@@ -115,6 +124,7 @@ final class VibecodersStore: NSObject, ObservableObject {
         online = []
         board = []
         devtimeToday = 0
+        todayPeriodEnd = nil
         errorText = nil
         Task { await refresh() }
     }
@@ -125,6 +135,7 @@ final class VibecodersStore: NSObject, ObservableObject {
         online = []
         board = []
         devtimeToday = 0
+        todayPeriodEnd = nil
         errorText = nil
     }
 
@@ -136,11 +147,13 @@ final class VibecodersStore: NSObject, ObservableObject {
             let me: UserResp = try await get("/api/user", query: [URLQueryItem(name: "login", value: username)])
             user = me.user
             devtimeToday = me.devtimeToday
+            updatePeriod(end: me.periodEnd, timezone: me.timezone)
             let onl: OnlineResp = try await get("/api/online")
             online = onl.online
             let lb: LeaderboardResp = try await get("/api/leaderboard",
                                                     query: [URLQueryItem(name: "period", value: "today")])
             board = lb.entries
+            updatePeriod(end: lb.periodEnd, timezone: lb.timezone)
             lastRefresh = Date()
             errorText = nil
         } catch VCError.notFound {
@@ -174,6 +187,7 @@ final class VibecodersStore: NSObject, ObservableObject {
                 let dec = snakeDecoder()
                 if let resp = try? dec.decode(PulseResp.self, from: data) {
                     devtimeToday = resp.devtimeToday
+                    updatePeriod(end: resp.periodEnd, timezone: resp.timezone)
                 }
             } catch {
                 // quiet: offline
@@ -186,16 +200,38 @@ final class VibecodersStore: NSObject, ObservableObject {
     private struct UserResp: Decodable {
         var user: VCUser
         var devtimeToday: Int64
+        var periodEnd: Date?
+        var timezone: String?
         enum CodingKeys: String, CodingKey {
-            case user
+            case user, timezone
             case devtimeToday = "devtime_today"
+            case periodEnd = "period_end"
         }
     }
     private struct OnlineResp: Decodable { var online: [VCOnlineUser] }
-    private struct LeaderboardResp: Decodable { var entries: [VCLeaderboardEntry] }
+    private struct LeaderboardResp: Decodable {
+        var entries: [VCLeaderboardEntry]
+        var periodEnd: Date?
+        var timezone: String?
+        enum CodingKeys: String, CodingKey {
+            case entries, timezone
+            case periodEnd = "period_end"
+        }
+    }
     private struct PulseResp: Decodable {
         var devtimeToday: Int64
-        enum CodingKeys: String, CodingKey { case devtimeToday = "devtime_today" }
+        var periodEnd: Date?
+        var timezone: String?
+        enum CodingKeys: String, CodingKey {
+            case timezone
+            case devtimeToday = "devtime_today"
+            case periodEnd = "period_end"
+        }
+    }
+
+    private func updatePeriod(end: Date?, timezone: String?) {
+        if let end { todayPeriodEnd = end }
+        if let timezone, !timezone.isEmpty { todayTimezone = timezone }
     }
 
     private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {

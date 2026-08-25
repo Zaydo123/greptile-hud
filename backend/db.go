@@ -94,7 +94,7 @@ func touchUser(ctx context.Context, db *sql.DB, id int64) error {
 
 // ---- devtime ----
 
-func pulse(ctx context.Context, db *sql.DB, userID int64) error {
+func pulse(ctx context.Context, db *sql.DB, userID int64, day string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -104,14 +104,14 @@ func pulse(ctx context.Context, db *sql.DB, userID int64) error {
 	var seconds sql.NullInt64
 	var lastBeat sql.NullTime
 	err = tx.QueryRowContext(ctx,
-		"SELECT seconds, last_heartbeat_at FROM devtime WHERE user_id = $1 AND day = CURRENT_DATE", userID).
+		"SELECT seconds, last_heartbeat_at FROM devtime WHERE user_id = $1 AND day = $2::date", userID, day).
 		Scan(&seconds, &lastBeat)
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
 	if err == sql.ErrNoRows {
 		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO devtime (user_id, day, seconds, last_heartbeat_at) VALUES ($1, CURRENT_DATE, 0, now())", userID); err != nil {
+			"INSERT INTO devtime (user_id, day, seconds, last_heartbeat_at) VALUES ($1, $2::date, 0, now())", userID, day); err != nil {
 			return err
 		}
 	} else {
@@ -119,13 +119,13 @@ func pulse(ctx context.Context, db *sql.DB, userID int64) error {
 		switch {
 		case dt >= 30*time.Second && dt <= 10*time.Minute:
 			if _, err := tx.ExecContext(ctx,
-				"UPDATE devtime SET seconds = seconds + $2, last_heartbeat_at = now() WHERE user_id = $1 AND day = CURRENT_DATE",
-				userID, int64(dt.Seconds())); err != nil {
+				"UPDATE devtime SET seconds = seconds + $2, last_heartbeat_at = now() WHERE user_id = $1 AND day = $3::date",
+				userID, int64(dt.Seconds()), day); err != nil {
 				return err
 			}
 		case dt > 10*time.Minute:
 			if _, err := tx.ExecContext(ctx,
-				"UPDATE devtime SET last_heartbeat_at = now() WHERE user_id = $1 AND day = CURRENT_DATE", userID); err != nil {
+				"UPDATE devtime SET last_heartbeat_at = now() WHERE user_id = $1 AND day = $2::date", userID, day); err != nil {
 				return err
 			}
 		}
@@ -137,10 +137,10 @@ func pulse(ctx context.Context, db *sql.DB, userID int64) error {
 	return tx.Commit()
 }
 
-func devtimeToday(ctx context.Context, db *sql.DB, userID int64) (int64, error) {
+func devtimeToday(ctx context.Context, db *sql.DB, userID int64, day string) (int64, error) {
 	var s sql.NullInt64
 	err := db.QueryRowContext(ctx,
-		"SELECT seconds FROM devtime WHERE user_id = $1 AND day = CURRENT_DATE", userID).Scan(&s)
+		"SELECT seconds FROM devtime WHERE user_id = $1 AND day = $2::date", userID, day).Scan(&s)
 	if err == sql.ErrNoRows || (err == nil && !s.Valid) {
 		return 0, nil
 	}

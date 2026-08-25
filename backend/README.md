@@ -40,7 +40,10 @@ No auth headers anywhere — the username identifies the user.
 
 Heartbeats accrue the elapsed time between beats, capped at 10 minutes and
 ignored under 30 seconds. Online = heartbeat within 5 minutes. The leaderboard
-shows today's seconds by default; `period=all` sums every recorded day.
+shows today's seconds by default; `period=all` sums every recorded day. A Crew
+day is the shared UTC calendar day (`00:00` through `24:00` UTC). Today responses
+include `period_start`, `period_end`, and `timezone` so clients can display the
+exact boundary.
 
 ## Running locally
 

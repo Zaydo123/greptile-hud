@@ -737,6 +737,7 @@ struct HUDView: View {
             }
             .padding(.horizontal, 9).padding(.vertical, 5)
             .background(Tokyo.magenta.opacity(0.14), in: Capsule())
+            .help(vibecoders.todayPeriodDescription)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
@@ -786,11 +787,12 @@ struct HUDView: View {
             HStack(spacing: 8) {
                 sectionLabel("Leaderboard")
                 Spacer(minLength: 4)
-                Text("today")
+                Text("today · \(vibecoders.todayTimezone.lowercased())")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Tokyo.magenta)
                     .padding(.horizontal, 9).padding(.vertical, 5)
                     .background(Tokyo.magenta.opacity(0.14), in: Capsule())
+                    .help(vibecoders.todayPeriodDescription)
             }
             if vibecoders.board.isEmpty {
                 Text("No devtime yet — open an editor and the minutes start stacking.")
