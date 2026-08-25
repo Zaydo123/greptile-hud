@@ -1,6 +1,13 @@
 import AppKit
 import SwiftUI
 
+/// The HUD stays nonactivating for normal peeks, but must be allowed to become
+/// key when an interactive control explicitly requests keyboard focus.
+private final class HUDPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = PRStore()
@@ -171,11 +178,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Overlay panel
 
     private func buildPanel() {
-        let p = NSPanel(contentRect: NSRect(x: 0, y: 0,
-                                           width: HUDMetrics.panelWidth,
-                                           height: HUDMetrics.panelHeight),
-                        styleMask: [.borderless, .nonactivatingPanel, .resizable],
-                        backing: .buffered, defer: false)
+        let p = HUDPanel(contentRect: NSRect(x: 0, y: 0,
+                                            width: HUDMetrics.panelWidth,
+                                            height: HUDMetrics.panelHeight),
+                         styleMask: [.borderless, .nonactivatingPanel, .resizable],
+                         backing: .buffered, defer: false)
         p.level = .screenSaver
         p.isOpaque = false
         p.backgroundColor = .clear
