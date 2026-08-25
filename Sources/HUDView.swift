@@ -195,6 +195,7 @@ final class FocusableTextField: NSTextField {
     override func mouseDown(with event: NSEvent) {
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKey()
+        window?.makeFirstResponder(self)
         super.mouseDown(with: event)
     }
 }
