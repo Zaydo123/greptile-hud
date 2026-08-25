@@ -359,7 +359,7 @@ struct HUDView: View {
                             .fixedSize()
                     }
                 }
-                if tab == .crew, vibecoders.hasUsername {
+                if vibecoders.hasUsername {
                     HStack(spacing: 5) {
                         Text("@\(vibecoders.username)")
                         Text("·").foregroundStyle(Tokyo.comment.opacity(0.7))
