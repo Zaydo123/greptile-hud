@@ -22,6 +22,25 @@ CREATE TABLE IF NOT EXISTS devtime (
 
 CREATE INDEX IF NOT EXISTS idx_devtime_day ON devtime (day);
 
+-- Forward-only activity sessions. Individual heartbeats are not retained;
+-- each row stores only the first and most recent qualifying activity times.
+CREATE TABLE IF NOT EXISTS sprints (
+    id                BIGSERIAL PRIMARY KEY,
+    user_id           BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    started_at        TIMESTAMPTZ NOT NULL,
+    last_active_at    TIMESTAMPTZ NOT NULL,
+    ended_at          TIMESTAMPTZ,
+    duration_seconds  BIGINT NOT NULL DEFAULT 0,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sprints_user_started
+    ON sprints (user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sprints_last_active
+    ON sprints (last_active_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sprints_one_open_per_user
+    ON sprints (user_id) WHERE ended_at IS NULL;
+
 -- Usernames compare case-insensitively so "Zayd" and "zayd" can't split into
 -- two people on the leaderboard.
 CREATE UNIQUE INDEX IF NOT EXISTS users_login_lower_idx ON users (lower(login));

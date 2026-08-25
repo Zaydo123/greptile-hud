@@ -94,7 +94,7 @@ func touchUser(ctx context.Context, db *sql.DB, id int64) error {
 
 // ---- devtime ----
 
-func pulse(ctx context.Context, db *sql.DB, userID int64, day string) error {
+func pulse(ctx context.Context, db *sql.DB, userID int64, day string, now time.Time) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -111,27 +111,30 @@ func pulse(ctx context.Context, db *sql.DB, userID int64, day string) error {
 	}
 	if err == sql.ErrNoRows {
 		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO devtime (user_id, day, seconds, last_heartbeat_at) VALUES ($1, $2::date, 0, now())", userID, day); err != nil {
+			"INSERT INTO devtime (user_id, day, seconds, last_heartbeat_at) VALUES ($1, $2::date, 0, $3)", userID, day, now); err != nil {
 			return err
 		}
 	} else {
-		dt := time.Since(lastBeat.Time)
+		dt := now.Sub(lastBeat.Time)
 		switch {
 		case dt >= 30*time.Second && dt <= 10*time.Minute:
 			if _, err := tx.ExecContext(ctx,
-				"UPDATE devtime SET seconds = seconds + $2, last_heartbeat_at = now() WHERE user_id = $1 AND day = $3::date",
-				userID, int64(dt.Seconds()), day); err != nil {
+				"UPDATE devtime SET seconds = seconds + $2, last_heartbeat_at = $3 WHERE user_id = $1 AND day = $4::date",
+				userID, int64(dt.Seconds()), now, day); err != nil {
 				return err
 			}
 		case dt > 10*time.Minute:
 			if _, err := tx.ExecContext(ctx,
-				"UPDATE devtime SET last_heartbeat_at = now() WHERE user_id = $1 AND day = $2::date", userID, day); err != nil {
+				"UPDATE devtime SET last_heartbeat_at = $3 WHERE user_id = $1 AND day = $2::date", userID, day, now); err != nil {
 				return err
 			}
 		}
 	}
+	if err := recordSprint(ctx, tx, userID, now); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
-		"UPDATE users SET last_seen = now() WHERE id = $1", userID); err != nil {
+		"UPDATE users SET last_seen = $2 WHERE id = $1", userID, now); err != nil {
 		return err
 	}
 	return tx.Commit()

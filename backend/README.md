@@ -31,10 +31,10 @@ No auth headers anywhere — the username identifies the user.
 | Method | Path                                   | Description                                  |
 | ------ | -------------------------------------- | -------------------------------------------- |
 | GET    | `/api/health`                          | liveness + db check                          |
-| GET    | `/api/user?login=name&period=today\|week\|month\|all` | profile + selected/today/all-time devtime |
+| GET    | `/api/user?login=name&period=today\|week\|month\|all` | profile + activity totals and sprints |
 | GET    | `/api/online`                          | users with a heartbeat in the last 5 minutes |
 | GET    | `/api/leaderboard?period=today\|week\|month\|all` | devtime leaderboard (default `today`) |
-| POST   | `/api/pulse`                           | devtime heartbeat (body `{"user":"zayd","app":"Cursor"}`) |
+| POST   | `/api/pulse`                           | activity heartbeat with username and app name |
 
 ## How devtime works
 
@@ -44,6 +44,17 @@ shows today's seconds by default. `period=week` uses Monday through Sunday,
 `period=month` uses the UTC calendar month, and `period=all` sums every recorded
 day. All bounded periods use shared UTC dates and include `period_start`,
 `period_end`, and `timezone` so clients can display the exact boundary.
+
+## How sprints work
+
+A sprint is a continuous activity session. The first qualifying heartbeat opens
+one, subsequent heartbeats extend it, and a gap longer than 10 minutes starts a
+new sprint. Sprint data uses the last observed activity as the end time; no idle grace period is
+added. Sprint history begins when this schema is deployed, cannot be
+reconstructed from older daily totals, and is retained for 90 days. The server
+stores session boundaries and duration, not individual heartbeat events, code,
+keystrokes, or repository data. Profile responses return at most the latest 250
+sprints in the selected period.
 
 ## Running locally
 

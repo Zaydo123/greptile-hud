@@ -24,6 +24,24 @@ struct VCCrewProfile: Equatable {
     var devtimePeriod: Int64
     var devtimeAll: Int64
     var online: Bool
+    var sprints: [VCSprint]
+    var periodStart: Date?
+    var periodEnd: Date?
+}
+
+struct VCSprint: Codable, Equatable, Identifiable {
+    var id: Int64
+    var startedAt: Date
+    var endedAt: Date
+    var durationSeconds: Int64
+    var active: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, active
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+        case durationSeconds = "duration_seconds"
+    }
 }
 
 enum VCLeaderboardPeriod: String, CaseIterable, Identifiable {
@@ -209,21 +227,24 @@ final class VibecodersStore: NSObject, ObservableObject {
     }
 
     private func loadProfile(login: String) async {
+        let requestedPeriod = leaderboardPeriod
         do {
-            let requestedPeriod = leaderboardPeriod
             let response: UserResp = try await get("/api/user", query: [
                 URLQueryItem(name: "login", value: login),
                 URLQueryItem(name: "period", value: requestedPeriod.rawValue)
             ])
-            guard selectedProfileLogin == login else { return }
+            guard selectedProfileLogin == login, leaderboardPeriod == requestedPeriod else { return }
             crewProfile = VCCrewProfile(user: response.user,
                                         period: VCLeaderboardPeriod(rawValue: response.period ?? "") ?? requestedPeriod,
                                         devtimePeriod: response.devtimePeriod ?? response.devtimeToday,
                                         devtimeAll: response.devtimeAll ?? response.devtimeToday,
-                                        online: response.online ?? false)
+                                        online: response.online ?? false,
+                                        sprints: response.sprints ?? [],
+                                        periodStart: response.periodStart,
+                                        periodEnd: response.periodEnd)
             profileLoading = false
         } catch {
-            guard selectedProfileLogin == login else { return }
+            guard selectedProfileLogin == login, leaderboardPeriod == requestedPeriod else { return }
             profileError = vcFriendly(error)
             profileLoading = false
         }
@@ -234,7 +255,14 @@ final class VibecodersStore: NSObject, ObservableObject {
     func selectLeaderboardPeriod(_ period: VCLeaderboardPeriod) {
         guard leaderboardPeriod != period else { return }
         leaderboardPeriod = period
-        Task { await refreshLeaderboard() }
+        let profileLogin = selectedProfileLogin
+        if profileLogin != nil { profileLoading = true }
+        Task {
+            await refreshLeaderboard()
+            if let profileLogin, selectedProfileLogin == profileLogin {
+                await loadProfile(login: profileLogin)
+            }
+        }
     }
 
     func refresh() async {
@@ -320,13 +348,16 @@ final class VibecodersStore: NSObject, ObservableObject {
         var devtimePeriod: Int64?
         var period: String?
         var online: Bool?
+        var sprints: [VCSprint]?
+        var periodStart: Date?
         var periodEnd: Date?
         var timezone: String?
         enum CodingKeys: String, CodingKey {
-            case user, online, period, timezone
+            case user, online, period, sprints, timezone
             case devtimeToday = "devtime_today"
             case devtimeAll = "devtime_all"
             case devtimePeriod = "devtime_period"
+            case periodStart = "period_start"
             case periodEnd = "period_end"
         }
     }

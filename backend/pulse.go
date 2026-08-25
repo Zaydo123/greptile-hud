@@ -29,8 +29,9 @@ func (s *server) handlePulse(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "could not record pulse")
 		return
 	}
-	period := currentDayPeriod()
-	if err := pulse(r.Context(), s.db, u.ID, period.dateKey()); err != nil {
+	now := time.Now().UTC()
+	period := utcDayPeriod(now)
+	if err := pulse(r.Context(), s.db, u.ID, period.dateKey(), now); err != nil {
 		logf("pulse: %s: %v", login, err)
 		httpError(w, http.StatusInternalServerError, "could not record pulse")
 		return
@@ -43,6 +44,6 @@ func (s *server) handlePulse(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, addDayPeriod(map[string]any{
 		"ok":            true,
 		"devtime_today": seconds,
-		"last_seen":     time.Now().UTC(),
+		"last_seen":     now,
 	}, period))
 }

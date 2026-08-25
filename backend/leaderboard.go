@@ -174,6 +174,11 @@ func (s *server) handleUser(w http.ResponseWriter, r *http.Request) {
 			logf("user %s devtime: %v", selectedPeriod, err)
 		}
 	}
+	sprints, err := listSprints(r.Context(), s.db, u.ID, selectedPeriod, selectedWindow)
+	if err != nil {
+		logf("user sprints: %v", err)
+		sprints = []Sprint{}
+	}
 	response := map[string]any{
 		"user":           u,
 		"devtime_today":  today,
@@ -181,6 +186,7 @@ func (s *server) handleUser(w http.ResponseWriter, r *http.Request) {
 		"devtime_period": periodValue,
 		"period":         selectedPeriod,
 		"online":         isOnline(u),
+		"sprints":        sprints,
 	}
 	if selectedPeriod != periodAll {
 		addDayPeriod(response, selectedWindow)
