@@ -207,7 +207,8 @@ vibecoders integration with the `backend/` service:
   devtime.
 - **Leaderboard and profiles** — Today, Week, and Month activity with visible
   UTC date ranges, rankings, sprint maps, exact sprint rows, join dates, and
-  last-online times, refreshed every minute.
+  last-online times. Hovering a sprint-map block shows its active duration and
+  every overlapping sprint's exact boundaries. Data refreshes every minute.
 - **Devtime tracking** — while Cursor, VS Code, iTerm2, Terminal, Ghostty, etc.
   are running, the app sends a heartbeat every 60s so the backend accrues
   devtime (this replaces the standalone `backend/client/devtime.sh` agent if

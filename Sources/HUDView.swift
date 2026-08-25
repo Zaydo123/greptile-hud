@@ -345,18 +345,36 @@ struct HUDView: View {
                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(Tokyo.blue.opacity(0.30)))
-            Text("Greptile Reviews")
-                .font(.system(size: 15, weight: .bold))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-            if !store.prs.isEmpty {
-                Text("\(store.prs.count)")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Tokyo.fgDim)
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(Tokyo.surface(1), in: Capsule())
-                    .fixedSize()
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 7) {
+                    Text("Greptile Reviews")
+                        .font(.system(size: 15, weight: .bold))
+                        .lineLimit(1)
+                    if !store.prs.isEmpty {
+                        Text("\(store.prs.count)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Tokyo.fgDim)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Tokyo.surface(1), in: Capsule())
+                            .fixedSize()
+                    }
+                }
+                if tab == .crew, vibecoders.hasUsername {
+                    HStack(spacing: 5) {
+                        Text("@\(vibecoders.username)")
+                        Text("·").foregroundStyle(Tokyo.comment.opacity(0.7))
+                        Image(systemName: "bolt.fill").foregroundStyle(Tokyo.magenta)
+                        Text("\(vcDuration(vibecoders.devtimeToday)) today")
+                            .monospacedDigit()
+                    }
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Tokyo.comment)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(vibecoders.todayPeriodDescription)
+                }
             }
+            .layoutPriority(1)
             Spacer(minLength: 8)
             if reviewingCount > 0 {
                 HStack(spacing: 5) {
@@ -699,52 +717,19 @@ struct HUDView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            VStack(spacing: 0) {
-                crewHeader
-                Rectangle().fill(Tokyo.line).frame(height: 1)
-                if vibecoders.selectedProfileLogin != nil {
-                    crewProfileContent
-                } else {
-                    ScrollView {
-                        VStack(spacing: 14) {
-                            onlineStrip
-                            leaderboardBlock
-                        }
-                        .padding(12)
+            if vibecoders.selectedProfileLogin != nil {
+                crewProfileContent
+            } else {
+                ScrollView {
+                    VStack(spacing: 14) {
+                        onlineStrip
+                        leaderboardBlock
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(12)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-    }
-
-    private var crewHeader: some View {
-        HStack(spacing: 10) {
-            Text(String(vibecoders.username.prefix(1)).uppercased())
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Tokyo.magenta)
-                .frame(width: 30, height: 30)
-                .background(Tokyo.magenta.opacity(0.17), in: Circle())
-            VStack(alignment: .leading, spacing: 1) {
-                Text("@\(vibecoders.username)")
-                    .font(.system(size: 13, weight: .bold))
-                if let name = vcDisplayName(vibecoders.user?.name) {
-                    Text(name)
-                        .font(.system(size: 10)).foregroundStyle(Tokyo.comment)
-                        .lineLimit(1).truncationMode(.tail)
-                }
-            }
-            Spacer(minLength: 8)
-            HStack(spacing: 4) {
-                Image(systemName: "bolt.fill").font(.system(size: 9, weight: .semibold)).foregroundStyle(Tokyo.magenta)
-                Text("\(vcDuration(vibecoders.devtimeToday)) today")
-                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
-            }
-            .padding(.horizontal, 9).padding(.vertical, 5)
-            .background(Tokyo.magenta.opacity(0.14), in: Capsule())
-            .help(vibecoders.todayPeriodDescription)
-        }
-        .padding(.horizontal, 16).padding(.vertical, 12)
     }
 
     private var onlineStrip: some View {
@@ -1122,12 +1107,14 @@ struct SprintMap: View {
                         .frame(width: 34, alignment: .leading)
                     ForEach(0..<24, id: \.self) { hour in
                         let start = Self.utcCalendar.date(byAdding: .hour, value: hour, to: day)!
-                        let seconds = activeSeconds(from: start,
-                                                    to: Self.utcCalendar.date(byAdding: .hour, value: 1, to: start)!)
+                        let next = Self.utcCalendar.date(byAdding: .hour, value: 1, to: start)!
+                        let seconds = activeSeconds(from: start, to: next)
+                        let tooltip = activityHelp(from: start, to: next)
                         RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .fill(activityColor(seconds: seconds, maximum: 3600))
                             .frame(maxWidth: .infinity, minHeight: 10, maxHeight: 10)
-                            .help("\(hourLabel(start)): \(vcDuration(Int64(seconds))) active")
+                            .help(tooltip)
+                            .accessibilityLabel(Text(tooltip))
                     }
                 }
             }
@@ -1150,10 +1137,12 @@ struct SprintMap: View {
                     if let day {
                         let next = Self.utcCalendar.date(byAdding: .day, value: 1, to: day)!
                         let seconds = activeSeconds(from: day, to: next)
+                        let tooltip = activityHelp(from: day, to: next)
                         RoundedRectangle(cornerRadius: 3, style: .continuous)
                             .fill(activityColor(seconds: seconds, maximum: 8 * 3600))
                             .frame(width: 14, height: 14)
-                            .help("\(fullDayLabel(day)): \(vcDuration(Int64(seconds))) active")
+                            .help(tooltip)
+                            .accessibilityLabel(Text(tooltip))
                     } else {
                         Color.clear.frame(width: 14, height: 14)
                     }
@@ -1172,6 +1161,37 @@ struct SprintMap: View {
         guard seconds > 0 else { return Tokyo.surface(1) }
         let intensity = min(1, seconds / maximum)
         return Tokyo.magenta.opacity(0.22 + intensity * 0.70)
+    }
+
+    private func activityHelp(from start: Date, to end: Date) -> String {
+        let matching = sprints
+            .filter { $0.startedAt < end && $0.endedAt > start }
+            .sorted { $0.startedAt < $1.startedAt }
+        let block = end.timeIntervalSince(start) <= 3600
+            ? "\(hourLabel(start)) hour"
+            : fullDayLabel(start)
+        let total = vcDuration(Int64(activeSeconds(from: start, to: end)))
+        guard !matching.isEmpty else {
+            return "\(block)\nNo sprint activity"
+        }
+        let sprintLines = matching.map { sprint in
+            let active = sprint.active ? " · active" : ""
+            return "\(sprintRangeLabel(sprint)) · \(vcDuration(sprint.durationSeconds))\(active)"
+        }
+        return (["\(block)\n\(total) active", "Sprints:"] + sprintLines).joined(separator: "\n")
+    }
+
+    private func sprintRangeLabel(_ sprint: VCSprint) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, HH:mm"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        if Self.utcCalendar.isDate(sprint.startedAt, inSameDayAs: sprint.endedAt) {
+            let endFormatter = DateFormatter()
+            endFormatter.dateFormat = "HH:mm 'UTC'"
+            endFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+            return "\(formatter.string(from: sprint.startedAt))–\(endFormatter.string(from: sprint.endedAt))"
+        }
+        return "\(formatter.string(from: sprint.startedAt))–\(formatter.string(from: sprint.endedAt)) UTC"
     }
 
     private func dayLabel(_ date: Date) -> String {
