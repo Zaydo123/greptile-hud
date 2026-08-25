@@ -31,7 +31,7 @@ No auth headers anywhere — the username identifies the user.
 | Method | Path                                   | Description                                  |
 | ------ | -------------------------------------- | -------------------------------------------- |
 | GET    | `/api/health`                          | liveness + db check                          |
-| GET    | `/api/user?login=name`                 | profile (created on first sight) + today's devtime |
+| GET    | `/api/user?login=name`                 | profile (created on first sight) + today/all-time devtime |
 | GET    | `/api/online`                          | users with a heartbeat in the last 5 minutes |
 | GET    | `/api/leaderboard?period=today\|all`   | devtime leaderboard (default `today`)        |
 | POST   | `/api/pulse`                           | devtime heartbeat (body `{"user":"zayd","app":"Cursor"}`) |

@@ -9,11 +9,20 @@ struct VCUser: Codable, Equatable {
     var login: String
     var name: String?
     var lastSeen: Date?
+    var createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, login, name
         case lastSeen = "last_seen"
+        case createdAt = "created_at"
     }
+}
+
+struct VCCrewProfile: Equatable {
+    var user: VCUser
+    var devtimeToday: Int64
+    var devtimeAll: Int64
+    var online: Bool
 }
 
 struct VCOnlineUser: Codable, Equatable {
@@ -87,6 +96,10 @@ final class VibecodersStore: NSObject, ObservableObject {
     @Published private(set) var todayPeriodEnd: Date?
     @Published private(set) var todayTimezone = "UTC"
     @Published private(set) var lastRefresh: Date?
+    @Published private(set) var selectedProfileLogin: String?
+    @Published private(set) var crewProfile: VCCrewProfile?
+    @Published private(set) var profileLoading = false
+    @Published private(set) var profileError: String?
     @Published var errorText: String?
 
     private static let usernameKey = "vibecoders.username"
@@ -125,6 +138,7 @@ final class VibecodersStore: NSObject, ObservableObject {
         board = []
         devtimeToday = 0
         todayPeriodEnd = nil
+        dismissProfile()
         errorText = nil
         Task { await refresh() }
     }
@@ -136,7 +150,41 @@ final class VibecodersStore: NSObject, ObservableObject {
         board = []
         devtimeToday = 0
         todayPeriodEnd = nil
+        dismissProfile()
         errorText = nil
+    }
+
+    // MARK: Crew profiles
+
+    func showProfile(login: String) {
+        selectedProfileLogin = login
+        crewProfile = nil
+        profileError = nil
+        profileLoading = true
+        Task { await loadProfile(login: login) }
+    }
+
+    func dismissProfile() {
+        selectedProfileLogin = nil
+        crewProfile = nil
+        profileError = nil
+        profileLoading = false
+    }
+
+    private func loadProfile(login: String) async {
+        do {
+            let response: UserResp = try await get("/api/user", query: [URLQueryItem(name: "login", value: login)])
+            guard selectedProfileLogin == login else { return }
+            crewProfile = VCCrewProfile(user: response.user,
+                                        devtimeToday: response.devtimeToday,
+                                        devtimeAll: response.devtimeAll ?? response.devtimeToday,
+                                        online: response.online ?? false)
+            profileLoading = false
+        } catch {
+            guard selectedProfileLogin == login else { return }
+            profileError = vcFriendly(error)
+            profileLoading = false
+        }
     }
 
     // MARK: Refresh
@@ -200,11 +248,14 @@ final class VibecodersStore: NSObject, ObservableObject {
     private struct UserResp: Decodable {
         var user: VCUser
         var devtimeToday: Int64
+        var devtimeAll: Int64?
+        var online: Bool?
         var periodEnd: Date?
         var timezone: String?
         enum CodingKeys: String, CodingKey {
-            case user, timezone
+            case user, online, timezone
             case devtimeToday = "devtime_today"
+            case devtimeAll = "devtime_all"
             case periodEnd = "period_end"
         }
     }

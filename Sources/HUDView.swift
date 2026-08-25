@@ -701,14 +701,18 @@ struct HUDView: View {
             VStack(spacing: 0) {
                 crewHeader
                 Rectangle().fill(Tokyo.line).frame(height: 1)
-                ScrollView {
-                    VStack(spacing: 14) {
-                        onlineStrip
-                        leaderboardBlock
+                if vibecoders.selectedProfileLogin != nil {
+                    crewProfileContent
+                } else {
+                    ScrollView {
+                        VStack(spacing: 14) {
+                            onlineStrip
+                            leaderboardBlock
+                        }
+                        .padding(12)
                     }
-                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -758,19 +762,26 @@ struct HUDView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(vibecoders.online, id: \.login) { u in
-                            HStack(spacing: 7) {
-                                Circle().fill(Tokyo.green).frame(width: 7, height: 7)
-                                Text(vcDisplayName(u.name) ?? u.login)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .lineLimit(1).truncationMode(.tail)
-                                Text(vcDuration(u.devtimeToday))
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(Tokyo.comment).monospacedDigit()
+                            Button {
+                                vibecoders.showProfile(login: u.login)
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Circle().fill(Tokyo.green).frame(width: 7, height: 7)
+                                    Text(vcDisplayName(u.name) ?? u.login)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .lineLimit(1).truncationMode(.tail)
+                                    Text(vcDuration(u.devtimeToday))
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(Tokyo.comment).monospacedDigit()
+                                }
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .frame(minHeight: 32)
+                                .background(Tokyo.surface(1),
+                                            in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                .contentShape(Rectangle())
                             }
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .frame(minHeight: 32)
-                            .background(Tokyo.surface(1),
-                                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .buttonStyle(.plain)
+                            .help("View @\(u.login)'s profile")
                         }
                     }
                 }
@@ -801,7 +812,7 @@ struct HUDView: View {
             } else {
                 VStack(spacing: 6) {
                     ForEach(vibecoders.board.prefix(10), id: \.login) { e in
-                        CrewRow(entry: e)
+                        CrewRow(entry: e) { vibecoders.showProfile(login: e.login) }
                     }
                 }
             }
@@ -821,6 +832,103 @@ struct HUDView: View {
             .textCase(.uppercase)
             .foregroundStyle(Tokyo.comment)
             .kerning(1.2)
+    }
+
+    @ViewBuilder private var crewProfileContent: some View {
+        if vibecoders.profileLoading {
+            VStack(spacing: 12) {
+                Spinner(size: 18, color: Tokyo.magenta)
+                Text("Loading profile…")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokyo.fgDim)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let profile = vibecoders.crewProfile {
+            ScrollView {
+                crewProfileCard(profile)
+                    .padding(16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(spacing: 12) {
+                Text(vibecoders.profileError ?? "Couldn’t load this profile")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokyo.orange)
+                Button("Back") { vibecoders.dismissProfile() }
+                    .buttonStyle(.plain).foregroundStyle(Tokyo.magenta)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func crewProfileCard(_ profile: VCCrewProfile) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Text(String(profile.user.login.prefix(1)).uppercased())
+                    .font(.system(size: 18, weight: .bold)).foregroundStyle(Tokyo.magenta)
+                    .frame(width: 42, height: 42)
+                    .background(Tokyo.magenta.opacity(0.16), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(vcDisplayName(profile.user.name) ?? profile.user.login)
+                        .font(.system(size: 16, weight: .bold))
+                    Text("@\(profile.user.login)")
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(Tokyo.comment)
+                }
+                Spacer()
+                Button { vibecoders.dismissProfile() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold)).foregroundStyle(Tokyo.fgDim)
+                        .frame(width: 30, height: 30)
+                        .background(Tokyo.surface(1), in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain).help("Back to Crew")
+            }
+
+            HStack(spacing: 10) {
+                profileMetric("Today", vcDuration(profile.devtimeToday), icon: "sun.max.fill")
+                profileMetric("All time", vcDuration(profile.devtimeAll), icon: "clock.fill")
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                profileDetail("Status", profile.online ? "Online now" : "Offline",
+                              icon: profile.online ? "circle.fill" : "moon.fill",
+                              tone: profile.online ? Tokyo.green : Tokyo.comment)
+                if let lastSeen = profile.user.lastSeen {
+                    profileDetail("Last online", lastSeen.formatted(date: .abbreviated, time: .shortened),
+                                  icon: "clock.arrow.circlepath", tone: Tokyo.cyan)
+                }
+                if let joined = profile.user.createdAt {
+                    profileDetail("Joined", joined.formatted(date: .long, time: .omitted),
+                                  icon: "calendar", tone: Tokyo.magenta)
+                }
+            }
+            .padding(14)
+            .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Tokyo.stroke()))
+        }
+        .padding(16)
+        .background(Tokyo.bgDark.opacity(0.75), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Tokyo.stroke(true)))
+    }
+
+    private func profileMetric(_ label: String, _ value: String, icon: String) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokyo.magenta)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.comment)
+                Text(value).font(.system(size: 15, weight: .bold)).monospacedDigit()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12).frame(maxWidth: .infinity)
+        .background(Tokyo.magenta.opacity(0.10), in: RoundedRectangle(cornerRadius: 11))
+    }
+
+    private func profileDetail(_ label: String, _ value: String, icon: String, tone: Color) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(tone).frame(width: 16)
+            Text(label).font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokyo.comment)
+            Spacer()
+            Text(value).font(.system(size: 11, weight: .semibold)).monospacedDigit()
+        }
     }
 }
 
@@ -1894,6 +2002,7 @@ struct RunRow: View {
 
 struct CrewRow: View {
     let entry: VCLeaderboardEntry
+    var onSelect: () -> Void = {}
     @State private var hovered = false
 
     private var rankColor: Color {
@@ -1906,36 +2015,39 @@ struct CrewRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text("\(entry.rank)")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(rankColor)
-                .frame(width: 22)
-            Text(String(entry.login.prefix(1)).uppercased())
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Tokyo.magenta)
-                .frame(width: 24, height: 24)
-                .background(Tokyo.magenta.opacity(0.15), in: Circle())
-            Text(vcDisplayName(entry.name) ?? entry.login)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-            if entry.online {
-                Circle().fill(Tokyo.green).frame(width: 7, height: 7)
-                    .shadow(color: Tokyo.green, radius: 3)
-                    .help("Online now")
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                Text("\(entry.rank)")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(rankColor)
+                    .frame(width: 22)
+                Text(String(entry.login.prefix(1)).uppercased())
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Tokyo.magenta)
+                    .frame(width: 24, height: 24)
+                    .background(Tokyo.magenta.opacity(0.15), in: Circle())
+                Text(vcDisplayName(entry.name) ?? entry.login)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                if entry.online {
+                    Circle().fill(Tokyo.green).frame(width: 7, height: 7)
+                        .shadow(color: Tokyo.green, radius: 3)
+                        .help("Online now")
+                }
+                Spacer(minLength: 6)
+                Text(vcDuration(entry.value))
+                    .font(.system(size: 13, weight: .bold)).monospacedDigit()
+                    .foregroundStyle(Tokyo.magenta)
             }
-            Spacer(minLength: 6)
-            Text(vcDuration(entry.value))
-                .font(.system(size: 13, weight: .bold)).monospacedDigit()
-                .foregroundStyle(Tokyo.magenta)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 40)
+            .background(Tokyo.surface(hovered ? 1 : 0),
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 40)
-        .background(Tokyo.surface(hovered ? 1 : 0),
-                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .help("@\(entry.login) · devtime: \(vcDuration(entry.value))")
+        .help("View @\(entry.login)'s profile")
     }
 }
 

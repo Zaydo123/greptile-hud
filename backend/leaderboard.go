@@ -163,9 +163,14 @@ func (s *server) handleUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logf("user devtime: %v", err)
 	}
+	all, err := devtimeAll(r.Context(), s.db, u.ID)
+	if err != nil {
+		logf("user all-time devtime: %v", err)
+	}
 	writeJSON(w, http.StatusOK, addDayPeriod(map[string]any{
 		"user":          u,
 		"devtime_today": today,
+		"devtime_all":   all,
 		"online":        isOnline(u),
 	}, period))
 }
