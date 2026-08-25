@@ -262,6 +262,7 @@ struct HUDView: View {
     var onResizeEnded: () -> Void = {}
 
     @State private var tab: Tab = .open
+    @State private var navigationRevision = 0
     @State private var showStale: Bool = false
     @State private var staleHovered: Bool = false
     @State private var usernameDraft = ""
@@ -289,7 +290,7 @@ struct HUDView: View {
                 Rectangle().fill(Tokyo.line).frame(height: 1)
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .id(tab)
+                    .id(navigationRevision)
                     .transition(.opacity)
                     .animation(.easeInOut(duration: 0.16), value: tab)
                 footer
@@ -523,18 +524,18 @@ struct HUDView: View {
     private var tabBar: some View {
         HStack(spacing: 4) {
             tabButton("Open", icon: "arrow.triangle.branch", count: store.prs.count, on: tab == .open) {
-                tab = .open
+                showOverview(.open)
             }
             tabButton("Train", icon: "tram.fill", count: trainCandidateCount, on: tab == .train,
                       accent: Tokyo.teal) {
-                tab = .train
+                showOverview(.train)
             }
             tabButton("Merged", icon: "arrow.triangle.merge", count: store.merged.count, on: tab == .merged) {
-                tab = .merged
+                showOverview(.merged)
             }
             tabButton("Crew", icon: "person.3", count: vibecoders.online.count, on: tab == .crew,
                       accent: Tokyo.magenta) {
-                tab = .crew
+                showOverview(.crew)
             }
         }
         .padding(4)
@@ -542,6 +543,16 @@ struct HUDView: View {
         .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
             .strokeBorder(Tokyo.stroke()))
         .padding(.horizontal, 16).padding(.bottom, 12)
+    }
+
+    /// Top-level tabs are also home buttons. Re-selecting one rebuilds its root
+    /// view, and Crew additionally leaves any member profile being viewed.
+    private func showOverview(_ destination: Tab) {
+        if destination == .crew {
+            vibecoders.dismissProfile()
+        }
+        tab = destination
+        navigationRevision += 1
     }
 
     private func tabButton(_ label: String, icon: String, count: Int, on: Bool,
@@ -566,7 +577,7 @@ struct HUDView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Show \(label.lowercased())")
+        .help(on ? "Back to \(label) overview" : "Show \(label.lowercased())")
     }
 
     @ViewBuilder private var openContent: some View {
