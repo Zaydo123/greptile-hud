@@ -1214,6 +1214,7 @@ struct SprintMap: View {
     }
 
     private func activityHelp(from start: Date, to end: Date) -> String {
+        let previewLimit = 3
         let matching = sprints
             .filter { $0.startedAt < end && $0.endedAt > start }
             .sorted { $0.startedAt < $1.startedAt }
@@ -1224,11 +1225,15 @@ struct SprintMap: View {
         guard !matching.isEmpty else {
             return "\(block)\nNo sprint activity"
         }
-        let sprintLines = matching.map { sprint in
+        let sprintLines = matching.prefix(previewLimit).map { sprint in
             let active = sprint.active ? " · active" : ""
             return "\(sprintRangeLabel(sprint)) · \(vcDuration(sprint.durationSeconds))\(active)"
         }
-        return (["\(block)\n\(total) active", "Sprints:"] + sprintLines).joined(separator: "\n")
+        let countLabel = matching.count == 1 ? "1 sprint" : "\(matching.count) sprints"
+        let remaining = matching.count - sprintLines.count
+        let overflow = remaining > 0 ? ["+\(remaining) more · see full sprint list below"] : []
+        return (["\(block)\n\(total) active · \(countLabel)"] + sprintLines + overflow)
+            .joined(separator: "\n")
     }
 
     private func sprintRangeLabel(_ sprint: VCSprint) -> String {
