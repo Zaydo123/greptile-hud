@@ -84,7 +84,8 @@ jobs:
             abort "rootDir set (Render ignores it; Dockerfile must be at repo root)" if backend["rootDir"]
             abort "bad dockerfile" unless backend["dockerfilePath"] == "Dockerfile"
             abort "no db env var" unless backend["envVars"].any? { |e| e["fromDatabase"]&.dig("name") == "greptile-hud-db" }
-            redirect = backend["envVars"].find { |e| e["key"] == "GITHUB_REDIRECT_URL" }
-            abort "redirect URL drift" unless redirect && redirect["value"] == "https://greptile-hud.onrender.com/auth/callback"
+            legacy_auth = %w[GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET GITHUB_REDIRECT_URL SESSION_SECRET]
+            configured = backend["envVars"].map { |e| e["key"] }.compact
+            abort "legacy auth configuration present" unless (configured & legacy_auth).empty?
             puts "blueprint OK"
           '
