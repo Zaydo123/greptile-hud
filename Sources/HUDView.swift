@@ -402,10 +402,14 @@ struct HUDView: View {
     private var clock: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { ctx in
             VStack(alignment: .trailing, spacing: 1) {
-                Text(HUDClock.time.string(from: ctx.date))
-                    .font(.system(size: 15, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Tokyo.cyan)
-                    .monospacedDigit()
+                HStack(spacing: 5) {
+                    Text(HUDClock.time.string(from: ctx.date))
+                        .font(.system(size: 15, weight: .bold, design: .monospaced))
+                        .monospacedDigit()
+                    Text("CURRENT")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                }
+                .foregroundStyle(Tokyo.cyan)
                 Text(syncLine(ctx.date))
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(Tokyo.comment)
