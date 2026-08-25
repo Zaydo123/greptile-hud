@@ -16,7 +16,8 @@ tracks a devtime leaderboard for the crew, deployed on Render. See
   Render's Custom Domains settings and the TLS cert is issued automatically.
 - `render.yaml` — a Render Blueprint that deploys the whole stack in one
   "connect repo" step: the Go backend (API + landing page) and Postgres.
-  See `backend/README.md` for the GitHub OAuth app setup it expects.
+  See `backend/README.md` for setup and API docs; the service requires only its
+  database connection and uses self-chosen usernames.
 
 **Hold Right Shift** → a translucent overlay appears showing every open PR you
 authored, with its latest Greptile **Confidence Score**, whether it's **currently
