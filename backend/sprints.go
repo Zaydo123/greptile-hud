@@ -7,9 +7,10 @@ import (
 )
 
 const (
-	sprintIdleGap   = 10 * time.Minute
-	sprintMinBeat   = 30 * time.Second
-	sprintRetention = 90 * 24 * time.Hour
+	sprintIdleGap               = 10 * time.Minute
+	sprintMinBeat               = 30 * time.Second
+	sprintRetention             = 90 * 24 * time.Hour
+	sprintMinimumDisplaySeconds = int64(60)
 )
 
 type sprintAction int
@@ -94,10 +95,12 @@ func listSprints(ctx context.Context, db *sql.DB, userID int64, periodName strin
 		SELECT id, started_at, COALESCE(ended_at, last_active_at), duration_seconds,
 			ended_at IS NULL AND last_active_at > now() - interval '5 minutes'
 		FROM sprints
-		WHERE user_id = $1 AND last_active_at >= now() - interval '90 days'`
-	args := []any{userID}
+		WHERE user_id = $1
+			AND duration_seconds >= $2
+			AND last_active_at >= now() - interval '90 days'`
+	args := []any{userID, sprintMinimumDisplaySeconds}
 	if periodName != periodAll {
-		query += ` AND started_at < $2 AND last_active_at >= $3`
+		query += ` AND started_at < $3 AND last_active_at >= $4`
 		args = append(args, period.End, period.Start)
 	}
 	query += ` ORDER BY started_at DESC LIMIT 250`
