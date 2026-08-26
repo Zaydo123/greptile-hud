@@ -30,7 +30,7 @@ func (s *server) handlePulse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	period := utcDayPeriod(now)
+	period := crewDayPeriod(now)
 	if err := pulse(r.Context(), s.db, u.ID, period.dateKey(), now); err != nil {
 		logf("pulse: %s: %v", login, err)
 		httpError(w, http.StatusInternalServerError, "could not record pulse")

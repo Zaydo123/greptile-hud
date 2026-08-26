@@ -41,8 +41,8 @@ No auth headers anywhere — the username identifies the user.
 Heartbeats accrue the elapsed time between beats, capped at 10 minutes and
 ignored under 30 seconds. Online = heartbeat within 5 minutes. The leaderboard
 shows today's seconds by default. `period=week` uses Monday through Sunday,
-`period=month` uses the UTC calendar month, and `period=all` sums every recorded
-day. All bounded periods use shared UTC dates and include `period_start`,
+`period=month` uses the Central Time calendar month, and `period=all` sums every
+recorded day. All bounded periods use shared `America/Chicago` dates and include `period_start`,
 `period_end`, and `timezone` so clients can display the exact boundary.
 
 ## How sprints work

@@ -5,7 +5,11 @@ import (
 	"time"
 )
 
-func TestUTCDayPeriodBoundary(t *testing.T) {
+func centralTime(year int, month time.Month, day, hour, minute int) time.Time {
+	return time.Date(year, month, day, hour, minute, 0, 0, crewDayLocation)
+}
+
+func TestCrewDayPeriodBoundary(t *testing.T) {
 	tests := []struct {
 		name      string
 		now       time.Time
@@ -13,38 +17,53 @@ func TestUTCDayPeriodBoundary(t *testing.T) {
 		wantEnd   time.Time
 	}{
 		{
-			name:      "immediately before midnight",
-			now:       time.Date(2026, time.August, 25, 23, 59, 59, 999999999, time.UTC),
-			wantStart: time.Date(2026, time.August, 25, 0, 0, 0, 0, time.UTC),
-			wantEnd:   time.Date(2026, time.August, 26, 0, 0, 0, 0, time.UTC),
+			name:      "UTC instant remains on prior Central day",
+			now:       time.Date(2026, time.August, 26, 4, 59, 59, 0, time.UTC),
+			wantStart: centralTime(2026, time.August, 25, 0, 0),
+			wantEnd:   centralTime(2026, time.August, 26, 0, 0),
 		},
 		{
-			name:      "exactly at midnight",
-			now:       time.Date(2026, time.August, 26, 0, 0, 0, 0, time.UTC),
-			wantStart: time.Date(2026, time.August, 26, 0, 0, 0, 0, time.UTC),
-			wantEnd:   time.Date(2026, time.August, 27, 0, 0, 0, 0, time.UTC),
+			name:      "Central midnight starts a new day",
+			now:       time.Date(2026, time.August, 26, 5, 0, 0, 0, time.UTC),
+			wantStart: centralTime(2026, time.August, 26, 0, 0),
+			wantEnd:   centralTime(2026, time.August, 27, 0, 0),
 		},
 		{
-			name:      "non-UTC input",
-			now:       time.Date(2026, time.August, 25, 20, 0, 0, 0, time.FixedZone("CDT", -5*60*60)),
-			wantStart: time.Date(2026, time.August, 26, 0, 0, 0, 0, time.UTC),
-			wantEnd:   time.Date(2026, time.August, 27, 0, 0, 0, 0, time.UTC),
+			name:      "spring DST day has calendar-day boundaries",
+			now:       centralTime(2026, time.March, 8, 12, 0),
+			wantStart: centralTime(2026, time.March, 8, 0, 0),
+			wantEnd:   centralTime(2026, time.March, 9, 0, 0),
+		},
+		{
+			name:      "fall DST day has calendar-day boundaries",
+			now:       centralTime(2026, time.November, 1, 12, 0),
+			wantStart: centralTime(2026, time.November, 1, 0, 0),
+			wantEnd:   centralTime(2026, time.November, 2, 0, 0),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := utcDayPeriod(tt.now)
+			got := crewDayPeriod(tt.now)
 			if !got.Start.Equal(tt.wantStart) || !got.End.Equal(tt.wantEnd) {
-				t.Fatalf("utcDayPeriod(%s) = [%s, %s), want [%s, %s)",
+				t.Fatalf("crewDayPeriod(%s) = [%s, %s), want [%s, %s)",
 					tt.now, got.Start, got.End, tt.wantStart, tt.wantEnd)
 			}
 		})
 	}
+
+	spring := crewDayPeriod(centralTime(2026, time.March, 8, 12, 0))
+	if got := spring.End.Sub(spring.Start); got != 23*time.Hour {
+		t.Fatalf("spring DST day = %s, want 23h", got)
+	}
+	fall := crewDayPeriod(centralTime(2026, time.November, 1, 12, 0))
+	if got := fall.End.Sub(fall.Start); got != 25*time.Hour {
+		t.Fatalf("fall DST day = %s, want 25h", got)
+	}
 }
 
-func TestUTCActivityPeriods(t *testing.T) {
-	now := time.Date(2026, time.August, 26, 17, 30, 0, 0, time.UTC) // Wednesday
+func TestCrewActivityPeriods(t *testing.T) {
+	now := centralTime(2026, time.August, 26, 17, 30) // Wednesday
 	tests := []struct {
 		requested string
 		wantName  string
@@ -52,24 +71,24 @@ func TestUTCActivityPeriods(t *testing.T) {
 		wantEnd   time.Time
 	}{
 		{periodToday, periodToday,
-			time.Date(2026, time.August, 26, 0, 0, 0, 0, time.UTC),
-			time.Date(2026, time.August, 27, 0, 0, 0, 0, time.UTC)},
+			centralTime(2026, time.August, 26, 0, 0),
+			centralTime(2026, time.August, 27, 0, 0)},
 		{periodWeek, periodWeek,
-			time.Date(2026, time.August, 24, 0, 0, 0, 0, time.UTC),
-			time.Date(2026, time.August, 31, 0, 0, 0, 0, time.UTC)},
+			centralTime(2026, time.August, 24, 0, 0),
+			centralTime(2026, time.August, 31, 0, 0)},
 		{periodMonth, periodMonth,
-			time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC),
-			time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)},
+			centralTime(2026, time.August, 1, 0, 0),
+			centralTime(2026, time.September, 1, 0, 0)},
 		{"unexpected", periodToday,
-			time.Date(2026, time.August, 26, 0, 0, 0, 0, time.UTC),
-			time.Date(2026, time.August, 27, 0, 0, 0, 0, time.UTC)},
+			centralTime(2026, time.August, 26, 0, 0),
+			centralTime(2026, time.August, 27, 0, 0)},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.requested, func(t *testing.T) {
-			name, got := utcActivityPeriod(now, tt.requested)
+			name, got := crewActivityPeriod(now, tt.requested)
 			if name != tt.wantName || !got.Start.Equal(tt.wantStart) || !got.End.Equal(tt.wantEnd) {
-				t.Fatalf("utcActivityPeriod(%q) = %q [%s, %s), want %q [%s, %s)",
+				t.Fatalf("crewActivityPeriod(%q) = %q [%s, %s), want %q [%s, %s)",
 					tt.requested, name, got.Start, got.End, tt.wantName, tt.wantStart, tt.wantEnd)
 			}
 		})

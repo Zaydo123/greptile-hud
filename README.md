@@ -206,7 +206,7 @@ vibecoders integration with the `backend/` service:
 - **Online now** — who's been active in the last 5 minutes, with today's
   devtime.
 - **Leaderboard and profiles** — Today, Week, and Month activity with visible
-  UTC date ranges, rankings, sprint maps, exact sprint rows, join dates, and
+  Central Time date ranges, rankings, sprint maps, exact sprint rows, join dates, and
   last-online times. Hovering a sprint-map block shows its active duration and
   every overlapping sprint's exact boundaries. Data refreshes every minute.
 - **Devtime tracking** — while Cursor, VS Code, iTerm2, Terminal, Ghostty, etc.
