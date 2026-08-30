@@ -54,7 +54,7 @@ added. Sprint history begins when this schema is deployed, cannot be
 reconstructed from older daily totals, and is retained for 90 days. The server
 stores session boundaries and duration, not individual heartbeat events, code,
 keystrokes, or repository data. Profile responses return at most the latest 250
-sprints in the selected period.
+sprints of at least one minute in the selected period.
 
 ## Running locally
 

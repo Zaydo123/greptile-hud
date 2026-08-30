@@ -29,3 +29,9 @@ func TestClassifySprintBeat(t *testing.T) {
 		})
 	}
 }
+
+func TestSprintMinimumDisplayDuration(t *testing.T) {
+	if sprintMinimumDisplaySeconds != int64(time.Minute/time.Second) {
+		t.Fatalf("sprintMinimumDisplaySeconds = %d, want 60", sprintMinimumDisplaySeconds)
+	}
+}
