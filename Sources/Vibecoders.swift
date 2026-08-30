@@ -342,10 +342,30 @@ final class VibecodersStore: NSObject, ObservableObject {
         return nil
     }
 
-    /// Send a heartbeat while a dev app is running; the backend accrues devtime
-    /// and marks us online. Stays quiet on failure (background check).
+    /// The user counts as present while the last keyboard/mouse/trackpad event
+    /// is under this old. Past it, heartbeats stop and the backend's idle-gap
+    /// rule closes the sprint — so a machine that is merely awake (DarkWake,
+    /// walked away, overnight agents) stops accruing devtime.
+    static let presenceCutoff: TimeInterval = 15 * 60
+
+    /// Seconds since the last user input event. CGEventSource exposes only the
+    /// elapsed-time counter — never which keys were pressed — and requires no
+    /// Accessibility grant.
+    static func secondsSinceLastInput() -> TimeInterval {
+        let inputs: [CGEventType] = [.keyDown, .flagsChanged, .mouseMoved,
+                                     .leftMouseDown, .rightMouseDown,
+                                     .otherMouseDown, .scrollWheel]
+        return inputs.map {
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
+        }.min() ?? 0
+    }
+
+    /// Send a heartbeat while a dev app is running and the user is actually
+    /// present; the backend accrues devtime and marks us online. Stays quiet
+    /// on failure (background check).
     func heartbeatIfActive() {
-        guard hasUsername, let app = Self.runningDevApp() else { return }
+        guard hasUsername, let app = Self.runningDevApp(),
+              Self.secondsSinceLastInput() < Self.presenceCutoff else { return }
         Task {
             do {
                 let body = try JSONEncoder().encode(["user": username, "app": app])
