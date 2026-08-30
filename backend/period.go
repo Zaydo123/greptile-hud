@@ -1,8 +1,19 @@
 package main
 
-import "time"
+import (
+	"time"
+	_ "time/tzdata"
+)
 
-const crewDayTimezone = "UTC"
+const crewDayTimezone = "America/Chicago"
+
+var crewDayLocation = func() *time.Location {
+	location, err := time.LoadLocation(crewDayTimezone)
+	if err != nil {
+		panic("load Crew timezone: " + err.Error())
+	}
+	return location
+}()
 
 const (
 	periodToday = "today"
@@ -17,24 +28,24 @@ type dayPeriod struct {
 }
 
 func currentDayPeriod() dayPeriod {
-	return utcDayPeriod(time.Now())
+	return crewDayPeriod(time.Now())
 }
 
-func utcDayPeriod(now time.Time) dayPeriod {
-	now = now.UTC()
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	return dayPeriod{Start: start, End: start.Add(24 * time.Hour)}
+func crewDayPeriod(now time.Time) dayPeriod {
+	now = now.In(crewDayLocation)
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, crewDayLocation)
+	return dayPeriod{Start: start, End: start.AddDate(0, 0, 1)}
 }
 
-func utcActivityPeriod(now time.Time, requested string) (string, dayPeriod) {
-	day := utcDayPeriod(now)
+func crewActivityPeriod(now time.Time, requested string) (string, dayPeriod) {
+	day := crewDayPeriod(now)
 	switch requested {
 	case periodWeek:
 		daysSinceMonday := (int(day.Start.Weekday()) + 6) % 7
 		start := day.Start.AddDate(0, 0, -daysSinceMonday)
 		return periodWeek, dayPeriod{Start: start, End: start.AddDate(0, 0, 7)}
 	case periodMonth:
-		start := time.Date(day.Start.Year(), day.Start.Month(), 1, 0, 0, 0, 0, time.UTC)
+		start := time.Date(day.Start.Year(), day.Start.Month(), 1, 0, 0, 0, 0, crewDayLocation)
 		return periodMonth, dayPeriod{Start: start, End: start.AddDate(0, 1, 0)}
 	case periodAll:
 		return periodAll, dayPeriod{}

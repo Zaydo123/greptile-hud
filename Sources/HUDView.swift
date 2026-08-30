@@ -1014,9 +1014,9 @@ struct HUDView: View {
                 Capsule().fill(Tokyo.line).frame(width: 2, height: 24)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(sprint.startedAt.formatted(date: .abbreviated, time: .omitted))
+                Text(sprintDateLabel(sprint.startedAt))
                     .font(.system(size: 10, weight: .semibold)).foregroundStyle(Tokyo.comment)
-                Text("\(sprint.startedAt.formatted(date: .omitted, time: .shortened)) – \(sprintEndLabel(sprint))")
+                Text("\(sprintTimeLabel(sprint.startedAt)) – \(sprintEndLabel(sprint))")
                     .font(.system(size: 12, weight: .semibold)).monospacedDigit()
             }
             Spacer(minLength: 8)
@@ -1036,14 +1036,34 @@ struct HUDView: View {
     }
 
     private func sprintEndLabel(_ sprint: VCSprint) -> String {
-        if Calendar.current.isDate(sprint.startedAt, inSameDayAs: sprint.endedAt) {
-            return sprint.endedAt.formatted(date: .omitted, time: .shortened)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Chicago")!
+        if calendar.isDate(sprint.startedAt, inSameDayAs: sprint.endedAt) {
+            return sprintTimeLabel(sprint.endedAt)
         }
-        return sprint.endedAt.formatted(date: .abbreviated, time: .shortened)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy, h:mm a"
+        formatter.timeZone = calendar.timeZone
+        return formatter.string(from: sprint.endedAt)
+    }
+
+    private func sprintDateLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        formatter.timeZone = TimeZone(identifier: "America/Chicago")
+        return formatter.string(from: date)
+    }
+
+    private func sprintTimeLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        formatter.timeZone = TimeZone(identifier: "America/Chicago")
+        return formatter.string(from: date)
     }
 }
 
-// MARK: - Sprint activity map (UTC, matching Crew period boundaries)
+// MARK: - Sprint activity map (Central Time, matching Crew period boundaries)
 
 struct SprintMap: View {
     let period: VCLeaderboardPeriod
@@ -1053,14 +1073,16 @@ struct SprintMap: View {
 
     @State private var hoveredBlockID: String?
 
-    private static var utcCalendar: Calendar = {
+    private static let centralTimezone = TimeZone(identifier: "America/Chicago")!
+
+    private static var centralCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        calendar.timeZone = centralTimezone
         return calendar
     }()
 
     private var bounds: (start: Date, end: Date) {
-        let calendar = Self.utcCalendar
+        let calendar = Self.centralCalendar
         let fallbackStart = calendar.startOfDay(for: Date())
         let start = periodStart ?? fallbackStart
         let fallbackEnd: Date
@@ -1077,7 +1099,7 @@ struct SprintMap: View {
         var day = bounds.start
         while day < bounds.end, result.count < 31 {
             result.append(day)
-            day = Self.utcCalendar.date(byAdding: .day, value: 1, to: day)!
+            day = Self.centralCalendar.date(byAdding: .day, value: 1, to: day)!
         }
         return result
     }
@@ -1089,7 +1111,7 @@ struct SprintMap: View {
                     .font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.comment)
                     .kerning(0.8)
                 Spacer()
-                Text("UTC")
+                Text("CENTRAL TIME")
                     .font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.comment)
             }
             if period == .month {
@@ -1119,8 +1141,8 @@ struct SprintMap: View {
                         .font(.system(size: 9, weight: .semibold)).foregroundStyle(Tokyo.comment)
                         .frame(width: 34, alignment: .leading)
                     ForEach(0..<24, id: \.self) { hour in
-                        let start = Self.utcCalendar.date(byAdding: .hour, value: hour, to: day)!
-                        let next = Self.utcCalendar.date(byAdding: .hour, value: 1, to: start)!
+                        let start = Self.centralCalendar.date(byAdding: .hour, value: hour, to: day)!
+                        let next = Self.centralCalendar.date(byAdding: .hour, value: 1, to: start)!
                         let seconds = activeSeconds(from: start, to: next)
                         let tooltip = activityHelp(from: start, to: next)
                         let blockID = "hour-\(start.timeIntervalSince1970)"
@@ -1145,7 +1167,7 @@ struct SprintMap: View {
     }
 
     private var monthGrid: some View {
-        let leading = max(0, Self.utcCalendar.component(.weekday, from: bounds.start) - 1)
+        let leading = max(0, Self.centralCalendar.component(.weekday, from: bounds.start) - 1)
         let cells = Array(repeating: Optional<Date>.none, count: leading) + days.map(Optional.some)
         let columns = Array(repeating: GridItem(.fixed(14), spacing: 5), count: 7)
         return VStack(alignment: .leading, spacing: 5) {
@@ -1158,7 +1180,7 @@ struct SprintMap: View {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 5) {
                 ForEach(Array(cells.enumerated()), id: \.offset) { index, day in
                     if let day {
-                        let next = Self.utcCalendar.date(byAdding: .day, value: 1, to: day)!
+                        let next = Self.centralCalendar.date(byAdding: .day, value: 1, to: day)!
                         let seconds = activeSeconds(from: day, to: next)
                         let tooltip = activityHelp(from: day, to: next)
                         let blockID = "day-\(day.timeIntervalSince1970)"
@@ -1250,34 +1272,34 @@ struct SprintMap: View {
     private func sprintRangeLabel(_ sprint: VCSprint) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, HH:mm"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        if Self.utcCalendar.isDate(sprint.startedAt, inSameDayAs: sprint.endedAt) {
+        formatter.timeZone = Self.centralTimezone
+        if Self.centralCalendar.isDate(sprint.startedAt, inSameDayAs: sprint.endedAt) {
             let endFormatter = DateFormatter()
-            endFormatter.dateFormat = "HH:mm 'UTC'"
-            endFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+            endFormatter.dateFormat = "HH:mm z"
+            endFormatter.timeZone = Self.centralTimezone
             return "\(formatter.string(from: sprint.startedAt))–\(endFormatter.string(from: sprint.endedAt))"
         }
-        return "\(formatter.string(from: sprint.startedAt))–\(formatter.string(from: sprint.endedAt)) UTC"
+        return "\(formatter.string(from: sprint.startedAt))–\(formatter.string(from: sprint.endedAt)) Central Time"
     }
 
     private func dayLabel(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = period == .today ? "MMM d" : "EEE"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.timeZone = Self.centralTimezone
         return formatter.string(from: date)
     }
 
     private func fullDayLabel(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.timeZone = Self.centralTimezone
         return formatter.string(from: date)
     }
 
     private func hourLabel(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, HH:mm 'UTC'"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MMM d, HH:mm z"
+        formatter.timeZone = Self.centralTimezone
         return formatter.string(from: date)
     }
 }

@@ -41,9 +41,9 @@ type leaderboardEntry struct {
 //
 //	GET /api/leaderboard?period=today|week|month|all
 //
-// "today" is the default. Calendar periods use shared UTC boundaries.
+// "today" is the default. Calendar periods use shared Central Time boundaries.
 func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
-	period, window := utcActivityPeriod(time.Now(), r.URL.Query().Get("period"))
+	period, window := crewActivityPeriod(time.Now(), r.URL.Query().Get("period"))
 	var rows *sql.Rows
 	var err error
 	if period == periodAll {
@@ -146,8 +146,8 @@ func (s *server) handleOnline(w http.ResponseWriter, r *http.Request) {
 // Everything is public; there is no auth.
 func (s *server) handleUser(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
-	day := utcDayPeriod(now)
-	selectedPeriod, selectedWindow := utcActivityPeriod(now, r.URL.Query().Get("period"))
+	day := crewDayPeriod(now)
+	selectedPeriod, selectedWindow := crewActivityPeriod(now, r.URL.Query().Get("period"))
 	login := normalizeLogin(r.URL.Query().Get("login"))
 	if login == "" {
 		httpError(w, http.StatusBadRequest, "missing or invalid login")

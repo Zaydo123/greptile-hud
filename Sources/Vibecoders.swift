@@ -118,7 +118,7 @@ func vcDisplayName(_ name: String?) -> String? {
     return trimmed.isEmpty ? nil : trimmed
 }
 
-func vcPeriodRange(start: Date?, end: Date?, timezone: String = "UTC") -> String? {
+func vcPeriodRange(start: Date?, end: Date?, timezone: String = "America/Chicago") -> String? {
     guard let start, let end, end > start else { return nil }
     let formatter = DateFormatter()
     formatter.dateStyle = .medium
@@ -129,7 +129,7 @@ func vcPeriodRange(start: Date?, end: Date?, timezone: String = "UTC") -> String
     return first == last ? "\(first) · \(timezone)" : "\(first) – \(last) · \(timezone)"
 }
 
-func vcExactPeriodDescription(_ label: String, start: Date?, end: Date?, timezone: String = "UTC") -> String {
+func vcExactPeriodDescription(_ label: String, start: Date?, end: Date?, timezone: String = "America/Chicago") -> String {
     guard let start, let end else { return "\(label) is measured in \(timezone)." }
     let formatter = DateFormatter()
     formatter.dateStyle = .medium
@@ -150,11 +150,11 @@ final class VibecodersStore: NSObject, ObservableObject {
     @Published private(set) var leaderboardPeriod: VCLeaderboardPeriod = .today
     @Published private(set) var leaderboardPeriodStart: Date?
     @Published private(set) var leaderboardPeriodEnd: Date?
-    @Published private(set) var leaderboardTimezone = "UTC"
+    @Published private(set) var leaderboardTimezone = "America/Chicago"
     @Published private(set) var boardRefreshing = false
     @Published private(set) var devtimeToday: Int64 = 0
     @Published private(set) var todayPeriodEnd: Date?
-    @Published private(set) var todayTimezone = "UTC"
+    @Published private(set) var todayTimezone = "America/Chicago"
     @Published private(set) var lastRefresh: Date?
     @Published private(set) var selectedProfileLogin: String?
     @Published private(set) var crewProfile: VCCrewProfile?
@@ -167,7 +167,7 @@ final class VibecodersStore: NSObject, ObservableObject {
     var username: String { UserDefaults.standard.string(forKey: Self.usernameKey) ?? "" }
     var hasUsername: Bool { !username.isEmpty }
     var todayPeriodDescription: String {
-        guard let end = todayPeriodEnd else { return "Today is measured in UTC." }
+        guard let end = todayPeriodEnd else { return "Today is measured in Central Time." }
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
