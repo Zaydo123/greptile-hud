@@ -1,13 +1,17 @@
 -- Vibecoders (Greptile HUD backend) schema. Applied automatically at startup.
 --
 -- Identity is trust-based: a user is just a self-chosen username. There is no
--- OAuth, no API token, and no GitHub data; the only thing tracked is devtime.
+-- OAuth, no API token, and no GitHub data. Devtime and explicitly started
+-- active statuses are the only shared data; completed status history is local.
 
 CREATE TABLE IF NOT EXISTS users (
     id         BIGSERIAL PRIMARY KEY,
     login      TEXT UNIQUE NOT NULL,
     name       TEXT,
     last_seen  TIMESTAMPTZ,
+    status_emoji      TEXT,
+    status_message    TEXT,
+    status_started_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -44,6 +48,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sprints_one_open_per_user
 -- Usernames compare case-insensitively so "Zayd" and "zayd" can't split into
 -- two people on the leaderboard.
 CREATE UNIQUE INDEX IF NOT EXISTS users_login_lower_idx ON users (lower(login));
+
+-- Status columns for databases created before crew statuses shipped.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status_emoji TEXT,
+                  ADD COLUMN IF NOT EXISTS status_message TEXT,
+                  ADD COLUMN IF NOT EXISTS status_started_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_users_active_status
+    ON users (status_started_at DESC) WHERE status_started_at IS NOT NULL;
 
 -- Migrations for databases created before the trust-based model (GitHub OAuth
 -- users, github_stats, and api_tokens are gone; nothing depends on them).

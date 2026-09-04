@@ -177,11 +177,11 @@ func hudDuration(_ from: Date, _ to: Date) -> String {
     return "\(sec)s"
 }
 
-// MARK: - Username field (typing in a nonactivating overlay)
+// MARK: - Text field (typing in a nonactivating overlay)
 
 /// An `NSTextField` that force-activates the app and keys the panel when
 /// clicked, so the HUD overlay — a nonactivating panel that never takes focus
-/// on its own — can actually receive keyboard input for the username.
+/// on its own — can actually receive keyboard input.
 final class FocusableTextField: NSTextField {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -202,8 +202,12 @@ final class FocusableTextField: NSTextField {
 
 /// SwiftUI wrapper that reports focus changes (the app keeps the overlay up
 /// while the field is focused) and submits on Enter.
-struct UsernameField: NSViewRepresentable {
+struct HUDTextField: NSViewRepresentable {
     @Binding var text: String
+    var placeholder = ""
+    var fontSize: CGFloat = 13
+    var alignment: NSTextAlignment = .left
+    var maximumCharacters: Int? = nil
     var onEditing: (Bool) -> Void = { _ in }
     var onSubmit: () -> Void = {}
 
@@ -211,12 +215,12 @@ struct UsernameField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> FocusableTextField {
         let field = FocusableTextField()
-        field.placeholderString = "username"
+        field.placeholderString = placeholder
         field.isBezeled = false
         field.drawsBackground = false
-        field.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        field.font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
         field.textColor = NSColor(Tokyo.fg)
-        field.alignment = .left
+        field.alignment = alignment
         field.focusRingType = .none
         field.usesSingleLineMode = true
         field.cell?.wraps = false
@@ -229,16 +233,27 @@ struct UsernameField: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: FocusableTextField, context: Context) {
+        context.coordinator.parent = self
+        nsView.placeholderString = placeholder
+        nsView.font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
+        nsView.alignment = alignment
         if nsView.stringValue != text { nsView.stringValue = text }
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
-        private var parent: UsernameField
-        init(_ parent: UsernameField) { self.parent = parent }
+        var parent: HUDTextField
+        init(_ parent: HUDTextField) { self.parent = parent }
 
         func controlTextDidChange(_ obj: Notification) {
             guard let field = obj.object as? NSTextField else { return }
-            parent.text = field.stringValue
+            let value: String
+            if let limit = parent.maximumCharacters, field.stringValue.count > limit {
+                value = String(field.stringValue.prefix(limit))
+                field.stringValue = value
+            } else {
+                value = field.stringValue
+            }
+            parent.text = value
         }
         func controlTextDidBeginEditing(_ obj: Notification) { parent.onEditing(true) }
         func controlTextDidEndEditing(_ obj: Notification) { parent.onEditing(false) }
@@ -251,12 +266,15 @@ struct UsernameField: NSViewRepresentable {
 struct HUDView: View {
     @ObservedObject var store: PRStore
     @ObservedObject var vibecoders: VibecodersStore
+    @ObservedObject var statuses: StatusStore
     @ObservedObject var hud: HUDState = HUDState()
     var onClose: () -> Void = {}
-    /// Fired when the username field gains/loses focus: the overlay is a
+    /// Fired when an editable text field gains/loses focus: the overlay is a
     /// nonactivating panel, so the app must activate itself to take typing,
     /// and the overlay must stay up while typing even if Right Shift releases.
-    var onUsernameEditing: (Bool) -> Void = { _ in }
+    var onTextEditing: (Bool) -> Void = { _ in }
+    /// Refreshes menu-bar chrome after starting or stopping a local status.
+    var onStatusChanged: () -> Void = {}
     /// Corner-drag resize, forwarded to the panel.
     var onResize: (CGSize) -> Void = { _ in }
     var onResizeEnded: () -> Void = {}
@@ -266,7 +284,7 @@ struct HUDView: View {
     @State private var showStale: Bool = false
     @State private var staleHovered: Bool = false
     @State private var usernameDraft = ""
-    private enum Tab { case open, train, merged, crew }
+    private enum Tab { case open, train, merged, status, crew }
 
     private static let staleThreshold: TimeInterval = 14 * 86400
 
@@ -491,11 +509,26 @@ struct HUDView: View {
                 .foregroundStyle(Tokyo.comment.opacity(0.85))
                 .fixedSize()
             Spacer(minLength: 6)
-            Text(Bebop.sessionTitle)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .kerning(1.2)
-                .foregroundStyle(Tokyo.comment.opacity(0.6))
-                .lineLimit(1)
+            if let status = statuses.active {
+                TimelineView(.periodic(from: Date(), by: 1)) { ctx in
+                    HStack(spacing: 5) {
+                        Text(status.emoji.isEmpty ? "●" : status.emoji)
+                        Text(status.message.isEmpty ? "STATUS" : status.message.uppercased())
+                            .lineLimit(1)
+                        Text(hudDuration(status.startedAt, ctx.date))
+                            .monospacedDigit()
+                    }
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Tokyo.yellow)
+                }
+                .help("Local status running")
+            } else {
+                Text(Bebop.sessionTitle)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .kerning(1.2)
+                    .foregroundStyle(Tokyo.comment.opacity(0.6))
+                    .lineLimit(1)
+            }
             Spacer(minLength: 6)
             TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                 Text("UPTIME \(hudDuration(HUDClock.launchedAt, ctx.date))")
@@ -516,11 +549,14 @@ struct HUDView: View {
         case .open:   openContent
         case .train:  TrainTab(store: store)
         case .merged: mergedContent
+        case .status: StatusesView(store: statuses, vibecoders: vibecoders,
+                                   onEditing: onTextEditing,
+                                   onChanged: onStatusChanged)
         case .crew:   crewContent
         }
     }
 
-    // Segmented Open / Train / Merged / Crew switcher for the main list.
+    // Segmented Open / Train / Merged / Status / Crew switcher for the main list.
     private var tabBar: some View {
         HStack(spacing: 4) {
             tabButton("Open", icon: "arrow.triangle.branch", count: store.prs.count, on: tab == .open) {
@@ -532,6 +568,10 @@ struct HUDView: View {
             }
             tabButton("Merged", icon: "arrow.triangle.merge", count: store.merged.count, on: tab == .merged) {
                 showOverview(.merged)
+            }
+            tabButton("Status", icon: "face.smiling", count: statuses.active == nil ? 0 : 1,
+                      on: tab == .status, accent: Tokyo.yellow) {
+                showOverview(.status)
             }
             tabButton("Crew", icon: "person.3", count: vibecoders.online.count, on: tab == .crew,
                       accent: Tokyo.magenta) {
@@ -702,16 +742,17 @@ struct HUDView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Tokyo.comment)
                     .multilineTextAlignment(.center)
-                UsernameField(text: $usernameDraft,
-                              onEditing: onUsernameEditing,
-                              onSubmit: { vibecoders.setUsername(usernameDraft) })
+                HUDTextField(text: $usernameDraft,
+                             placeholder: "username",
+                             onEditing: onTextEditing,
+                             onSubmit: joinCrew)
                     .frame(width: 220, height: 36)
                     .padding(.horizontal, 8)
                     .background(Tokyo.bgDark.opacity(0.8), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .strokeBorder(Tokyo.stroke(true)))
                 Button {
-                    vibecoders.setUsername(usernameDraft)
+                    joinCrew()
                 } label: {
                     Text("Join the crew")
                         .font(.system(size: 13, weight: .semibold))
@@ -733,6 +774,7 @@ struct HUDView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 14) {
+                        if !vibecoders.crewStatuses.isEmpty { crewStatusStrip }
                         onlineStrip
                         leaderboardBlock
                     }
@@ -741,6 +783,37 @@ struct HUDView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+
+    private var crewStatusStrip: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 7) {
+                sectionLabel("Crew statuses")
+                Text("\(vibecoders.crewStatuses.count)")
+                    .font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.yellow)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Tokyo.yellow.opacity(0.13), in: Capsule())
+                Spacer()
+                Text("ACTIVE UNTIL STOPPED")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Tokyo.comment)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(vibecoders.crewStatuses) { status in
+                        Button { vibecoders.showProfile(login: status.login) } label: {
+                            CrewStatusCard(status: status)
+                        }
+                        .buttonStyle(.plain)
+                        .help("View @\(status.login)")
+                    }
+                }
+            }
+        }
+        .padding(11)
+        .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(Tokyo.stroke()))
     }
 
     private var onlineStrip: some View {
@@ -767,6 +840,11 @@ struct HUDView: View {
                                     Text(vcDisplayName(u.name) ?? u.login)
                                         .font(.system(size: 12, weight: .semibold))
                                         .lineLimit(1).truncationMode(.tail)
+                                    if let status = crewStatus(for: u.login) {
+                                        Text(status.emoji.isEmpty ? "●" : status.emoji)
+                                            .font(.system(size: 11))
+                                            .help(status.message.isEmpty ? "Status running" : status.message)
+                                    }
                                     Text(vcDuration(u.devtimeToday))
                                         .font(.system(size: 10, weight: .medium))
                                         .foregroundStyle(Tokyo.comment).monospacedDigit()
@@ -886,7 +964,10 @@ struct HUDView: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                profileDetail("Status", profile.online ? "Online now" : "Offline",
+                if let status = crewStatus(for: profile.user.login) {
+                    crewProfileStatus(status)
+                }
+                profileDetail("Presence", profile.online ? "Online now" : "Offline",
                               icon: profile.online ? "circle.fill" : "moon.fill",
                               tone: profile.online ? Tokyo.green : Tokyo.comment)
                 if let lastSeen = profile.user.lastSeen {
@@ -1003,6 +1084,31 @@ struct HUDView: View {
             Spacer()
             Text(value).font(.system(size: 11, weight: .semibold)).monospacedDigit()
         }
+    }
+
+    private func crewProfileStatus(_ status: VCCrewStatus) -> some View {
+        HStack(spacing: 9) {
+            Text(status.emoji.isEmpty ? "●" : status.emoji).font(.system(size: 14)).frame(width: 16)
+            Text("Status").font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokyo.comment)
+            Text(status.message.isEmpty ? "Status" : status.message)
+                .font(.system(size: 11, weight: .semibold)).lineLimit(1)
+            Spacer(minLength: 8)
+            TimelineView(.periodic(from: Date(), by: 1)) { ctx in
+                Text(hudDuration(status.startedAt, ctx.date))
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Tokyo.yellow).monospacedDigit()
+            }
+            .fixedSize()
+        }
+    }
+
+    private func crewStatus(for login: String) -> VCCrewStatus? {
+        vibecoders.crewStatuses.first { $0.login.caseInsensitiveCompare(login) == .orderedSame }
+    }
+
+    private func joinCrew() {
+        vibecoders.setUsername(usernameDraft)
+        vibecoders.publishStatus(statuses.active)
     }
 
     private func sprintRow(_ sprint: VCSprint) -> some View {
@@ -1331,6 +1437,338 @@ enum HUDClock {
         f.dateFormat = "EEE d MMM"
         return f
     }()
+}
+
+struct CrewStatusCard: View {
+    let status: VCCrewStatus
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Text(status.emoji.isEmpty ? "●" : status.emoji)
+                .font(.system(size: 21)).frame(width: 36, height: 36)
+                .background(Tokyo.yellow.opacity(0.13),
+                            in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Circle().fill(status.online ? Tokyo.green : Tokyo.comment)
+                        .frame(width: 5, height: 5)
+                    Text(vcDisplayName(status.name) ?? status.login)
+                        .font(.system(size: 11, weight: .bold)).lineLimit(1)
+                }
+                Text(status.message.isEmpty ? "Status" : status.message)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Tokyo.fgDim).lineLimit(1)
+                TimelineView(.periodic(from: Date(), by: 1)) { ctx in
+                    Text(hudDuration(status.startedAt, ctx.date))
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Tokyo.yellow).monospacedDigit()
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .frame(width: 210, alignment: .leading)
+        .frame(minHeight: 58)
+        .background(Tokyo.surface(1),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(Tokyo.yellow.opacity(0.22)))
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Local status stopwatch
+
+struct StatusesView: View {
+    @ObservedObject var store: StatusStore
+    @ObservedObject var vibecoders: VibecodersStore
+    var onEditing: (Bool) -> Void = { _ in }
+    var onChanged: () -> Void = {}
+
+    @State private var emoji = ""
+    @State private var message = ""
+
+    private let suggestedEmoji = ["🏋️", "🍽️", "☕️", "🎯", "🚶"]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let active = store.active {
+                    activeCard(active)
+                } else {
+                    composer
+                }
+                sharingState
+
+                HStack(spacing: 7) {
+                    sectionLabel("History")
+                    if !store.history.isEmpty {
+                        Text("\(store.history.count)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Tokyo.comment)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Tokyo.surface(1), in: Capsule())
+                    }
+                    Spacer()
+                    Text("LOCAL ONLY")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .kerning(1)
+                        .foregroundStyle(Tokyo.comment)
+                }
+
+                if store.history.isEmpty {
+                    VStack(spacing: 9) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 21, weight: .medium))
+                            .foregroundStyle(Tokyo.comment)
+                            .frame(width: 44, height: 44)
+                            .background(Tokyo.surface(0), in: Circle())
+                            .overlay(Circle().strokeBorder(Tokyo.stroke()))
+                        Text("Stopped statuses will appear here")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Tokyo.fgDim)
+                        Text("Completed history stays on this Mac.")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Tokyo.comment)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 26)
+                } else {
+                    LazyVStack(spacing: 8) {
+                        ForEach(store.history) { session in
+                            StatusHistoryRow(session: session)
+                        }
+                    }
+                }
+            }
+            .padding(12)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Start a status")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("A stopwatch that runs until you stop it.")
+                        .font(.system(size: 11)).foregroundStyle(Tokyo.comment)
+                }
+                Spacer()
+                Image(systemName: "stopwatch.fill")
+                    .font(.system(size: 16, weight: .semibold)).foregroundStyle(Tokyo.yellow)
+            }
+
+            HStack(spacing: 9) {
+                HUDTextField(text: $emoji,
+                             placeholder: "🙂",
+                             fontSize: 22,
+                             alignment: .center,
+                             maximumCharacters: 1,
+                             onEditing: onEditing,
+                             onSubmit: start)
+                    .frame(width: 48, height: 40)
+                    .background(Tokyo.bgDark.opacity(0.8),
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Tokyo.stroke(true)))
+
+                HUDTextField(text: $message,
+                             placeholder: "What are you up to?",
+                             maximumCharacters: 80,
+                             onEditing: onEditing,
+                             onSubmit: start)
+                    .frame(maxWidth: .infinity, minHeight: 40)
+                    .padding(.horizontal, 10)
+                    .background(Tokyo.bgDark.opacity(0.8),
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Tokyo.stroke(true)))
+
+                Button(action: start) {
+                    Label("Start", systemImage: "play.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Tokyo.bgDark)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 40)
+                        .background(canStart ? Tokyo.green : Tokyo.terminalBlack,
+                                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canStart)
+            }
+
+            HStack(spacing: 7) {
+                Text("QUICK")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .kerning(1).foregroundStyle(Tokyo.comment)
+                ForEach(suggestedEmoji, id: \.self) { item in
+                    Button(item) { emoji = item }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 16))
+                        .frame(width: 30, height: 28)
+                        .background(emoji == item ? Tokyo.yellow.opacity(0.15) : Tokyo.surface(1),
+                                    in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(emoji == item ? Tokyo.yellow.opacity(0.4) : Tokyo.stroke()))
+                }
+                Spacer()
+            }
+        }
+        .padding(14)
+        .background(Tokyo.yellow.opacity(0.07),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(Tokyo.yellow.opacity(0.30)))
+    }
+
+    private func activeCard(_ session: StatusSession) -> some View {
+        VStack(spacing: 13) {
+            HStack(spacing: 13) {
+                Text(session.emoji.isEmpty ? "●" : session.emoji)
+                    .font(.system(size: 31))
+                    .frame(width: 54, height: 54)
+                    .background(Tokyo.yellow.opacity(0.14),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Tokyo.yellow.opacity(0.28)))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Tokyo.green).frame(width: 6, height: 6)
+                        Text("RUNNING")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .kerning(1).foregroundStyle(Tokyo.green)
+                    }
+                    Text(session.message.isEmpty ? "Status" : session.message)
+                        .font(.system(size: 16, weight: .bold)).lineLimit(2)
+                    Text("Started \(session.startedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(.system(size: 10, weight: .medium)).foregroundStyle(Tokyo.comment)
+                }
+                Spacer(minLength: 8)
+                TimelineView(.periodic(from: Date(), by: 1)) { ctx in
+                    Text(hudDuration(session.startedAt, ctx.date))
+                        .font(.system(size: 19, weight: .bold, design: .monospaced))
+                        .monospacedDigit().foregroundStyle(Tokyo.yellow)
+                }
+                .fixedSize()
+            }
+
+            Button {
+                store.stop()
+                vibecoders.publishStatus(nil)
+                onEditing(false)
+                onChanged()
+            } label: {
+                Label("Stop and save", systemImage: "stop.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Tokyo.bgDark)
+                    .frame(maxWidth: .infinity, minHeight: 40)
+                    .background(Tokyo.red, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Stop the timer and add this period to history")
+        }
+        .padding(14)
+        .background(Tokyo.yellow.opacity(0.07),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(Tokyo.yellow.opacity(0.34)))
+    }
+
+    private var canStart: Bool {
+        !emoji.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func start() {
+        guard canStart else { return }
+        store.start(emoji: emoji, message: message)
+        vibecoders.publishStatus(store.active)
+        emoji = ""
+        message = ""
+        onEditing(false)
+        onChanged()
+    }
+
+    @ViewBuilder private var sharingState: some View {
+        if vibecoders.statusSyncing {
+            HStack(spacing: 7) {
+                Spinner(size: 10, color: Tokyo.yellow)
+                Text("Sharing active status with Crew…")
+            }
+            .font(.system(size: 10, weight: .semibold)).foregroundStyle(Tokyo.fgDim)
+        } else if let error = vibecoders.statusError {
+            HStack(spacing: 8) {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(Tokyo.orange)
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                Button("Retry") { vibecoders.publishStatus(store.active) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .bold)).foregroundStyle(Tokyo.yellow)
+            }
+        } else if vibecoders.hasUsername {
+            Label(store.active == nil
+                  ? "Your next status will be visible to Crew as @\(vibecoders.username)"
+                  : "Visible to Crew as @\(vibecoders.username)",
+                  systemImage: "person.3.fill")
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(Tokyo.comment)
+        } else {
+            Label("Local only until you join Crew", systemImage: "lock.fill")
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(Tokyo.comment)
+        }
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(Tokyo.comment)
+            .kerning(1.2)
+    }
+}
+
+struct StatusHistoryRow: View {
+    let session: StatusSession
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Text(session.emoji.isEmpty ? "●" : session.emoji)
+                .font(.system(size: 20)).frame(width: 38, height: 38)
+                .background(Tokyo.surface(1),
+                            in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(session.message.isEmpty ? "Status" : session.message)
+                    .font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                if let endedAt = session.endedAt {
+                    Text(timeRange(to: endedAt))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Tokyo.comment).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            if let endedAt = session.endedAt {
+                Text(hudDuration(session.startedAt, endedAt))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .monospacedDigit().foregroundStyle(Tokyo.yellow)
+            }
+        }
+        .padding(.horizontal, 11)
+        .frame(minHeight: 56)
+        .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(Tokyo.stroke()))
+    }
+
+    private func timeRange(to endedAt: Date) -> String {
+        let start = session.startedAt.formatted(date: .abbreviated, time: .shortened)
+        let endStyle: Date.FormatStyle.DateStyle = Calendar.current.isDate(session.startedAt, inSameDayAs: endedAt)
+            ? .omitted : .abbreviated
+        let end = endedAt.formatted(date: endStyle, time: .shortened)
+        return "\(start) – \(end)"
+    }
 }
 
 // MARK: - One PR row

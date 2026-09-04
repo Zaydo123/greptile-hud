@@ -12,6 +12,7 @@ private final class HUDPanel: NSPanel {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = PRStore()
     let vibecoders = VibecodersStore()
+    let statuses = StatusStore()
     private let updater = UpdateController()
 
     private var panel: NSPanel!
@@ -35,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         get { hudState.pinned }
         set { hudState.pinned = newValue }
     }
-    private var usernameFieldEditing = false
+    private var textFieldEditing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildStatusItem()
@@ -45,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { await store.refresh() }
         Task { await vibecoders.refresh() }
+        vibecoders.publishStatus(statuses.active)
         Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             await updater.checkForUpdates(userInitiated: false)
@@ -74,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.delegate = self
         statusItem.menu = menu
         populateMenu(menu)
+        updateStatusItemButton()
     }
 
     // MARK: Menu (rebuilt on open so leaderboard/online stay fresh)
@@ -91,6 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(reset)
 
         menu.addItem(.separator())
+        addStatusMenu(menu)
+        menu.addItem(.separator())
         addVibecodersMenu(menu)
         menu.addItem(.separator())
 
@@ -103,6 +108,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(access)
         menu.addItem(quit)
+    }
+
+    private func addStatusMenu(_ menu: NSMenu) {
+        let header = NSMenuItem(title: "Status", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+
+        guard let status = statuses.active else {
+            let empty = NSMenuItem(title: "No status running", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+            return
+        }
+
+        let emoji = status.emoji.isEmpty ? "●" : status.emoji
+        let message = status.message.isEmpty ? "Status" : status.message
+        let current = NSMenuItem(title: "\(emoji) \(message) — \(hudDuration(status.startedAt, Date()))",
+                                 action: nil, keyEquivalent: "")
+        current.isEnabled = false
+        menu.addItem(current)
+
+        let stop = NSMenuItem(title: "Stop and save status", action: #selector(stopCurrentStatus), keyEquivalent: "")
+        stop.target = self
+        menu.addItem(stop)
     }
 
     private func addVibecodersMenu(_ menu: NSMenu) {
@@ -169,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
             vibecoders.setUsername(field.stringValue)
+            vibecoders.publishStatus(statuses.active)
         }
     }
 
@@ -190,16 +220,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.isMovableByWindowBackground = true   // drag the HUD anywhere by its background
         p.hidesOnDeactivate = false
         p.isFloatingPanel = true
-        p.becomesKeyOnlyIfNeeded = true   // let the username field take typing without stealing focus on every peek
+        p.becomesKeyOnlyIfNeeded = true   // let text fields take typing without stealing focus on every peek
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         p.contentMinSize = NSSize(width: HUDMetrics.minPanelWidth, height: HUDMetrics.minPanelHeight)
         p.contentMaxSize = NSSize(width: 4000, height: 3000)
         p.delegate = self
 
-        let host = NSHostingView(rootView: HUDView(store: store, vibecoders: vibecoders, hud: hudState, onClose: { [weak self] in
+        let host = NSHostingView(rootView: HUDView(store: store, vibecoders: vibecoders,
+                                                  statuses: statuses, hud: hudState, onClose: { [weak self] in
             self?.dismissOverlay()
-        }, onUsernameEditing: { [weak self] editing in
-            self?.usernameFieldEditing = editing
+        }, onTextEditing: { [weak self] editing in
+            self?.textFieldEditing = editing
+        }, onStatusChanged: { [weak self] in
+            self?.updateStatusItemButton()
         }, onResize: { [weak self] translation in
             self?.resizePanel(translation: translation)
         }, onResizeEnded: { [weak self] in
@@ -319,7 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// latch, cancel any in-flight hold so it can't re-latch a hidden HUD, hide.
     private func dismissOverlay() {
         pinned = false
-        usernameFieldEditing = false
+        textFieldEditing = false
         latchTimer?.invalidate()
         latchTimer = nil
         hudState.holdStartedAt = nil
@@ -355,15 +388,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] e in
             guard let self else { return }
-            if e.keyCode == 53, self.pinned || self.usernameFieldEditing {   // Esc closes a pinned HUD (or while typing)
+            if e.keyCode == 53, self.pinned || self.textFieldEditing {   // Esc closes a pinned HUD (or while typing)
                 self.dismissOverlay()
             }
         }
         // Global monitors don't fire for our own events; once the app is active
-        // (username typing) Esc must be caught here instead.
+        // (text-field editing) Esc must be caught here instead.
         localEscMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] e in
             guard let self else { return e }
-            if e.keyCode == 53, self.pinned || self.usernameFieldEditing {
+            if e.keyCode == 53, self.pinned || self.textFieldEditing {
                 self.dismissOverlay()
             }
             return e
@@ -394,7 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hudState.holdStartedAt = nil
             latchTimer?.invalidate()
             latchTimer = nil
-            if !usernameFieldEditing { hideOverlay() }   // no-op once latched; don't vanish mid-typing either
+            if !textFieldEditing { hideOverlay() }   // no-op once latched; don't vanish mid-typing either
         }
     }
 
@@ -420,6 +453,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshNow() { Task { await store.refresh(force: true) } }
 
+    @objc private func stopCurrentStatus() {
+        statuses.stop()
+        vibecoders.publishStatus(nil)
+        updateStatusItemButton()
+    }
+
     @objc private func checkForUpdates() {
         Task { await updater.checkForUpdates(userInitiated: true) }
     }
@@ -431,6 +470,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
+
+    private func updateStatusItemButton() {
+        guard let button = statusItem?.button else { return }
+        if let status = statuses.active {
+            button.image = nil
+            button.title = status.emoji.isEmpty ? "●" : status.emoji
+            let message = status.message.isEmpty ? "Status" : status.message
+            button.toolTip = "\(button.title) \(message) — running locally"
+        } else {
+            button.title = ""
+            button.image = NSImage(systemSymbolName: "eyes", accessibilityDescription: "Greptile HUD")
+            button.toolTip = "Greptile HUD — hold Right ⇧ to peek"
+        }
+    }
 
     private func promptAccessibilityIfNeeded() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String

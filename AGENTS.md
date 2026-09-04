@@ -26,11 +26,12 @@ The app:
 - `Sources/Models.swift`: shared data models.
 - `Sources/GitHub.swift`: `gh` command runner, GitHub queries, and `PRStore`.
 - `Sources/Vibecoders.swift`: vibecoders store — devtime heartbeats, leaderboard
-  fetches, and trust-based username handling (no OAuth, no tokens).
+  and active-status fetches, and trust-based username handling (no OAuth, no tokens).
 - `Sources/Updater.swift`: GitHub Releases checking, validation, installation,
   and relaunch logic.
-- `backend/`: Go + Postgres "vibecoders" service (devtime leaderboard API and
-  embedded landing page) deployed on Render via `render.yaml`. Identity is
+- `backend/`: Go + Postgres "vibecoders" service (devtime leaderboard, active
+  crew-status API, and embedded landing page) deployed on Render via
+  `render.yaml`. Identity is
   trust-based: users self-choose a username; there is deliberately no
   authentication, OAuth, or GitHub activity tracking. See `backend/README.md`.
 - `Info.plist`: bundle metadata and source-of-truth version for local builds.
@@ -149,6 +150,17 @@ Anything that fetches on click must say so in place: skeleton rows for a first
 load (`PRCardSkeleton` / `RunRowSkeleton`), `IndeterminateBar` under a section
 re-fetching, or an inline spinner on the control that was clicked. Don't leave a
 clicked control looking idle while its request is in flight.
+
+## Crew statuses
+
+- Status timing and completed history are owned by the local `StatusStore` and
+  persisted in UserDefaults. A running status must survive app relaunches.
+- Only the active emoji, message, and original start time are published through
+  Vibecoders. Never upload completed history or sync a status to GitHub.
+- Shared statuses must remain visible after a user falls out of the five-minute
+  online window; presence and an explicitly running status are separate states.
+- Queue active-status writes in order so a quick Start then Stop cannot leave a
+  stale remote status behind.
 
 ## Stacked pull requests
 
