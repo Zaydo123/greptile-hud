@@ -152,6 +152,63 @@ struct MergedPR: Identifiable, Equatable {
     let mergedAt: Date?
 }
 
+// MARK: - Local statuses
+
+/// A user-authored status interval. A missing end date means its stopwatch is
+/// still running; stopped sessions become the local status history.
+struct StatusSession: Identifiable, Codable, Equatable {
+    let id: UUID
+    let emoji: String
+    let message: String
+    let startedAt: Date
+    var endedAt: Date?
+
+    var isActive: Bool { endedAt == nil }
+}
+
+/// Local-only status stopwatch and history. The whole value is small and is
+/// persisted in UserDefaults so a running status survives an app relaunch.
+@MainActor
+final class StatusStore: ObservableObject {
+    @Published private(set) var sessions: [StatusSession] = []
+
+    private let defaults: UserDefaults
+    private let storageKey = "status.sessions.v1"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        guard let data = defaults.data(forKey: storageKey),
+              let saved = try? JSONDecoder().decode([StatusSession].self, from: data) else { return }
+        sessions = saved.sorted { $0.startedAt > $1.startedAt }
+    }
+
+    var active: StatusSession? { sessions.first(where: \.isActive) }
+    var history: [StatusSession] { sessions.filter { !$0.isActive } }
+
+    func start(emoji rawEmoji: String, message rawMessage: String, at date: Date = Date()) {
+        let trimmedEmoji = rawEmoji.trimmingCharacters(in: .whitespacesAndNewlines)
+        let emoji = trimmedEmoji.first.map(String.init) ?? ""
+        let message = String(rawMessage.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        guard !emoji.isEmpty || !message.isEmpty else { return }
+
+        stop(at: date)
+        sessions.insert(StatusSession(id: UUID(), emoji: emoji, message: message,
+                                      startedAt: date, endedAt: nil), at: 0)
+        save()
+    }
+
+    func stop(at date: Date = Date()) {
+        guard let index = sessions.firstIndex(where: \.isActive) else { return }
+        sessions[index].endedAt = max(date, sessions[index].startedAt)
+        save()
+    }
+
+    private func save() {
+        guard let data = try? JSONEncoder().encode(sessions) else { return }
+        defaults.set(data, forKey: storageKey)
+    }
+}
+
 // MARK: - Merge trains
 
 /// A group of open PRs that share a repo and base branch — the candidate pool a

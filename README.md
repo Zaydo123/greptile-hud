@@ -182,6 +182,21 @@ and by then the PR that named the repo is closed. If you have neither (you pushe
 straight to a branch), it falls back to the repos in your recent push events. The
 list is capped at 8 repos per refresh.
 
+## Statuses
+
+The **Status** tab is an activity stopwatch. Pick an emoji, add an optional
+short note such as `At the gym`, and press **Start**. It keeps running until you
+stop it—there is no preset expiration—and the menu-bar eyes change to the active
+emoji while it runs.
+
+**Stop and save** records the exact start time, end time, and elapsed duration in
+the on-device history. An active status survives app relaunches. The menu-bar menu
+also shows the running status and can stop it without opening the HUD. Statuses are
+never sent to GitHub. If you have joined Vibecoders, the active emoji, note, and
+start time are shared with the Crew tab until you stop it—even after you leave the
+five-minute Online list. Completed history stays only in local UserDefaults and is
+never uploaded. Without a Crew username, the entire feature remains local.
+
 ## Requirements
 
 - `gh` CLI, logged in (`gh auth status` should show ✓) — already set up on this machine
@@ -205,6 +220,11 @@ vibecoders integration with the `backend/` service:
   UserDefaults, cleared by "Forget username").
 - **Online now** — who's been active in the last 5 minutes, with today's
   devtime.
+- **Crew statuses** — active emoji + note stopwatches remain visible even while
+  someone is away from their keyboard; completed status history is never uploaded.
+- **Shareable stats cards** — choose Today, Week, Month, or All time and export
+  your latest devtime, Crew rank, all-time total, and sprint count as a polished
+  1200 × 630 PNG through the macOS share sheet. The image is rendered locally.
 - **Leaderboard and profiles** — Today, Week, and Month activity with visible
   Central Time date ranges, rankings, sprint maps, exact sprint rows, join dates, and
   last-online times. Hovering a sprint-map block shows its active duration and
@@ -213,7 +233,8 @@ vibecoders integration with the `backend/` service:
   are running, the app sends a heartbeat every 60s so the backend accrues
   devtime (this replaces the standalone `backend/client/devtime.sh` agent if
   you run the HUD app). The heartbeat sends only your username, the app name,
-  and a timestamp — no code, no keystrokes, no repo data.
+  and a timestamp — no code, no keystrokes, no repo data. If you explicitly start
+  a status, its emoji, note, and start time are also shared until you stop it.
 
 Menu-bar: Vibecoders ▸ Join the devtime leaderboard, Online now, Leaderboard,
 Refresh, Change username, Forget username.

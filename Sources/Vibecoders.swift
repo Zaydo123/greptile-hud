@@ -73,6 +73,39 @@ struct VCOnlineUser: Codable, Equatable {
     }
 }
 
+/// A crew member's explicitly running status. Unlike presence, this remains
+/// visible while the person is away from their keyboard.
+struct VCCrewStatus: Codable, Equatable, Identifiable {
+    var login: String
+    var name: String?
+    var emoji: String
+    var message: String
+    var startedAt: Date
+    var online: Bool
+
+    var id: String { login.lowercased() }
+
+    enum CodingKeys: String, CodingKey {
+        case login, name, emoji, message, online
+        case startedAt = "started_at"
+    }
+}
+
+/// A point-in-time snapshot used to render a shareable devtime image. The
+/// snapshot is assembled locally from the existing public Crew APIs; sharing
+/// it never uploads a generated image or creates a new server-side record.
+struct VCStatsCardData: Equatable {
+    var login: String
+    var name: String?
+    var period: VCLeaderboardPeriod
+    var devtimePeriod: Int64
+    var devtimeAll: Int64
+    var rank: Int?
+    var sprintCount: Int
+    var periodRange: String?
+    var generatedAt: Date
+}
+
 struct VCLeaderboardEntry: Codable, Equatable {
     var rank: Int
     var login: String
@@ -146,6 +179,7 @@ final class VibecodersStore: NSObject, ObservableObject {
 
     @Published private(set) var user: VCUser?
     @Published private(set) var online: [VCOnlineUser] = []
+    @Published private(set) var crewStatuses: [VCCrewStatus] = []
     @Published private(set) var board: [VCLeaderboardEntry] = []
     @Published private(set) var leaderboardPeriod: VCLeaderboardPeriod = .today
     @Published private(set) var leaderboardPeriodStart: Date?
@@ -160,9 +194,13 @@ final class VibecodersStore: NSObject, ObservableObject {
     @Published private(set) var crewProfile: VCCrewProfile?
     @Published private(set) var profileLoading = false
     @Published private(set) var profileError: String?
+    @Published private(set) var statusSyncing = false
+    @Published private(set) var statusError: String?
     @Published var errorText: String?
 
     private static let usernameKey = "vibecoders.username"
+    private var statusSyncTask: Task<Void, Never>?
+    private var statusSyncRevision = 0
 
     var username: String { UserDefaults.standard.string(forKey: Self.usernameKey) ?? "" }
     var hasUsername: Bool { !username.isEmpty }
@@ -203,9 +241,14 @@ final class VibecodersStore: NSObject, ObservableObject {
             errorText = "Pick a username: letters, numbers, - and _ (max 32 characters)"
             return
         }
+        let previous = username
+        if !previous.isEmpty && previous.caseInsensitiveCompare(cleaned) != .orderedSame {
+            enqueueStatus(nil, username: previous, reportErrors: false)
+        }
         UserDefaults.standard.set(cleaned, forKey: Self.usernameKey)
         user = nil
         online = []
+        crewStatuses = []
         board = []
         leaderboardPeriod = .today
         leaderboardPeriodStart = nil
@@ -213,14 +256,20 @@ final class VibecodersStore: NSObject, ObservableObject {
         devtimeToday = 0
         todayPeriodEnd = nil
         dismissProfile()
+        statusError = nil
         errorText = nil
         Task { await refresh() }
     }
 
     func clearUsername() {
+        let previous = username
+        if !previous.isEmpty {
+            enqueueStatus(nil, username: previous, reportErrors: false)
+        }
         UserDefaults.standard.removeObject(forKey: Self.usernameKey)
         user = nil
         online = []
+        crewStatuses = []
         board = []
         leaderboardPeriod = .today
         leaderboardPeriodStart = nil
@@ -228,6 +277,7 @@ final class VibecodersStore: NSObject, ObservableObject {
         devtimeToday = 0
         todayPeriodEnd = nil
         dismissProfile()
+        statusError = nil
         errorText = nil
     }
 
@@ -297,6 +347,7 @@ final class VibecodersStore: NSObject, ObservableObject {
             updatePeriod(end: me.periodEnd, timezone: me.timezone)
             let onl: OnlineResp = try await get("/api/online")
             online = onl.online
+            await refreshStatuses()
             await refreshLeaderboard()
             lastRefresh = Date()
         } catch VCError.notFound {
@@ -304,6 +355,34 @@ final class VibecodersStore: NSObject, ObservableObject {
         } catch {
             errorText = vcFriendly(error)
         }
+    }
+
+    /// Fetch the signed-in crew member's selected-period totals immediately
+    /// before sharing so the exported card does not use stale leaderboard UI.
+    func ownStatsCardData() async throws -> VCStatsCardData {
+        guard hasUsername else { throw VCError.failed("Join Vibecoders before sharing stats") }
+        let requestedPeriod = leaderboardPeriod
+        let response: UserResp = try await get("/api/user", query: [
+            URLQueryItem(name: "login", value: username),
+            URLQueryItem(name: "period", value: requestedPeriod.rawValue)
+        ])
+        let leaderboard: LeaderboardResp = try await get("/api/leaderboard", query: [
+            URLQueryItem(name: "period", value: requestedPeriod.rawValue)
+        ])
+        let entry = leaderboard.entries.first {
+            $0.login.caseInsensitiveCompare(username) == .orderedSame
+        }
+        return VCStatsCardData(login: response.user.login,
+                               name: response.user.name,
+                               period: VCLeaderboardPeriod(rawValue: response.period ?? "") ?? requestedPeriod,
+                               devtimePeriod: response.devtimePeriod ?? response.devtimeToday,
+                               devtimeAll: response.devtimeAll ?? response.devtimeToday,
+                               rank: entry?.rank,
+                               sprintCount: response.sprints?.count ?? 0,
+                               periodRange: vcPeriodRange(start: response.periodStart,
+                                                          end: response.periodEnd,
+                                                          timezone: response.timezone ?? leaderboardTimezone),
+                               generatedAt: Date())
     }
 
     private func refreshLeaderboard() async {
@@ -326,6 +405,65 @@ final class VibecodersStore: NSObject, ObservableObject {
             guard leaderboardPeriod == requestedPeriod else { return }
             boardRefreshing = false
             errorText = vcFriendly(error)
+        }
+    }
+
+    private func refreshStatuses() async {
+        do {
+            let response: StatusesResp = try await get("/api/statuses")
+            crewStatuses = response.statuses
+        } catch VCError.notFound {
+            // Backward-compatible during a backend/app rollout.
+            crewStatuses = []
+        } catch {
+            // Keep the rest of Crew usable if only this optional feed fails.
+        }
+    }
+
+    // MARK: Shared statuses
+
+    /// Queue status writes so a quick Start → Stop cannot arrive at the server
+    /// out of order. Only the active value is shared; completed history stays
+    /// in the local StatusStore.
+    func publishStatus(_ session: StatusSession?) {
+        guard hasUsername else {
+            statusError = nil
+            return
+        }
+        enqueueStatus(session, username: username, reportErrors: true)
+    }
+
+    private func enqueueStatus(_ session: StatusSession?, username: String, reportErrors: Bool) {
+        statusSyncRevision += 1
+        let revision = statusSyncRevision
+        let previous = statusSyncTask
+        statusSyncing = reportErrors
+        statusSyncTask = Task { [weak self] in
+            _ = await previous?.value
+            guard let self else { return }
+            do {
+                if let session {
+                    let payload = StatusWriteRequest(user: username,
+                                                     emoji: session.emoji,
+                                                     message: session.message,
+                                                     startedAt: session.startedAt)
+                    let encoder = JSONEncoder()
+                    encoder.dateEncodingStrategy = .iso8601
+                    _ = try await self.post("/api/status", json: encoder.encode(payload))
+                } else {
+                    let data = try JSONEncoder().encode(StatusClearRequest(user: username))
+                    _ = try await self.send("/api/status", method: "DELETE", json: data)
+                }
+                if reportErrors { self.statusError = nil }
+                await self.refreshStatuses()
+            } catch {
+                if reportErrors {
+                    self.statusError = "Saved locally, but couldn’t share with Crew: \(vcFriendly(error))"
+                }
+            }
+            if revision == self.statusSyncRevision {
+                self.statusSyncing = false
+            }
         }
     }
 
@@ -404,6 +542,18 @@ final class VibecodersStore: NSObject, ObservableObject {
         }
     }
     private struct OnlineResp: Decodable { var online: [VCOnlineUser] }
+    private struct StatusesResp: Decodable { var statuses: [VCCrewStatus] }
+    private struct StatusWriteRequest: Encodable {
+        var user: String
+        var emoji: String
+        var message: String
+        var startedAt: Date
+        enum CodingKeys: String, CodingKey {
+            case user, emoji, message
+            case startedAt = "started_at"
+        }
+    }
+    private struct StatusClearRequest: Encodable { var user: String }
     private struct LeaderboardResp: Decodable {
         var entries: [VCLeaderboardEntry]
         var periodStart: Date?
@@ -444,8 +594,12 @@ final class VibecodersStore: NSObject, ObservableObject {
     }
 
     private func post(_ path: String, json: Data? = nil) async throws -> Data {
+        try await send(path, method: "POST", json: json)
+    }
+
+    private func send(_ path: String, method: String, json: Data? = nil) async throws -> Data {
         var req = URLRequest(url: Self.apiBaseURL.appendingPathComponent(path))
-        req.httpMethod = "POST"
+        req.httpMethod = method
         if let json {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = json

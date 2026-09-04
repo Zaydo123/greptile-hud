@@ -5,7 +5,8 @@ single Go binary that:
 
 - tracks devtime: the macOS app (or the small agent in `client/`) heartbeats
   while an editor/terminal is running, and the server accrues the time;
-- exposes a devtime leaderboard and an "online now" feed over a small REST API.
+- exposes a devtime leaderboard and an "online now" feed over a small REST API;
+- shares explicitly started crew statuses until their owners stop them.
 
 Identity is trust-based: a user is just a self-chosen username. There is no
 GitHub OAuth, no tokens, no sessions, and no GitHub activity tracking (no
@@ -34,7 +35,15 @@ No auth headers anywhere — the username identifies the user.
 | GET    | `/api/user?login=name&period=today\|week\|month\|all` | profile + activity totals and sprints |
 | GET    | `/api/online`                          | users with a heartbeat in the last 5 minutes |
 | GET    | `/api/leaderboard?period=today\|week\|month\|all` | devtime leaderboard (default `today`) |
+| GET    | `/api/statuses`                        | all explicitly running crew statuses         |
+| POST   | `/api/status`                          | set an active emoji/message status            |
+| DELETE | `/api/status`                          | clear the active status                       |
 | POST   | `/api/pulse`                           | activity heartbeat with username and app name |
+
+`POST /api/status` accepts `user`, `emoji`, `message`, and `started_at`.
+`DELETE /api/status` accepts `user`. At least an emoji or message is required
+when setting a status. Only the active status is stored centrally; completed
+status intervals remain in the Mac app's local history.
 
 ## How devtime works
 
@@ -98,5 +107,7 @@ WezTerm, Alacritty, kitty, Neovide — override with `VC_APPS`.
 - Identity is unauthenticated on purpose: anyone can claim a username or add
   devtime to someone else's name. It's a vibes leaderboard, not a payroll
   system. If that ever matters, add real auth then.
-- Nothing leaves the app except the username, the app name, and heartbeat
-  timing. No code, no keystrokes, no repo data.
+- Nothing leaves the app automatically except the username, the app name, and
+  heartbeat timing. Starting a status also publishes its emoji, message, and
+  start time until it is stopped. No code, keystrokes, repo data, or completed
+  status history is sent.

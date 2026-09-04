@@ -70,6 +70,9 @@ func main() {
 	mux.HandleFunc("GET /api/user", s.handleUser)
 	mux.HandleFunc("GET /api/online", s.handleOnline)
 	mux.HandleFunc("GET /api/leaderboard", s.handleLeaderboard)
+	mux.HandleFunc("GET /api/statuses", s.handleStatuses)
+	mux.HandleFunc("POST /api/status", s.handleSetStatus)
+	mux.HandleFunc("DELETE /api/status", s.handleClearStatus)
 	mux.HandleFunc("POST /api/pulse", s.handlePulse)
 
 	// Landing page (site/), embedded into the binary so goathud.com serves the
