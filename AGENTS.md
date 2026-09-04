@@ -162,6 +162,17 @@ clicked control looking idle while its request is in flight.
 - Queue active-status writes in order so a quick Start then Stop cannot leave a
   stale remote status behind.
 
+## Stats cards
+
+- Shareable stats cards are snapshots of the signed-in user's aggregate
+  Vibecoders data for the selected leaderboard period.
+- Render cards locally as 1200 × 630 PNG images and hand them to the native
+  macOS share sheet. Do not upload generated images or add server-side share
+  records.
+- Cards may contain the username, display name, selected-period devtime, Crew
+  rank, all-time devtime, sprint count, and period range. Never include status
+  history, repository data, or exact sprint timestamps.
+
 ## Stacked pull requests
 
 Stack mode is built entirely from base-branch changes (`PATCH /repos/…/pulls/{n}`

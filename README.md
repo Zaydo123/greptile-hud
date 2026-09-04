@@ -222,6 +222,9 @@ vibecoders integration with the `backend/` service:
   devtime.
 - **Crew statuses** — active emoji + note stopwatches remain visible even while
   someone is away from their keyboard; completed status history is never uploaded.
+- **Shareable stats cards** — choose Today, Week, Month, or All time and export
+  your latest devtime, Crew rank, all-time total, and sprint count as a polished
+  1200 × 630 PNG through the macOS share sheet. The image is rendered locally.
 - **Leaderboard and profiles** — Today, Week, and Month activity with visible
   Central Time date ranges, rankings, sprint maps, exact sprint rows, join dates, and
   last-online times. Hovering a sprint-map block shows its active duration and

@@ -284,6 +284,8 @@ struct HUDView: View {
     @State private var showStale: Bool = false
     @State private var staleHovered: Bool = false
     @State private var usernameDraft = ""
+    @State private var statsCardSharing = false
+    @State private var statsCardError: String?
     private enum Tab { case open, train, merged, status, crew }
 
     private static let staleThreshold: TimeInterval = 14 * 86400
@@ -774,6 +776,7 @@ struct HUDView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 14) {
+                        myStatsShareBlock
                         if !vibecoders.crewStatuses.isEmpty { crewStatusStrip }
                         onlineStrip
                         leaderboardBlock
@@ -781,6 +784,90 @@ struct HUDView: View {
                     .padding(12)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private var myStatsShareBlock: some View {
+        let entry = vibecoders.board.first {
+            $0.login.caseInsensitiveCompare(vibecoders.username) == .orderedSame
+        }
+        let seconds = entry?.value ?? (vibecoders.leaderboardPeriod == .today ? vibecoders.devtimeToday : 0)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                sectionLabel("Your shareable stats")
+                Spacer(minLength: 4)
+                crewPeriodPicker
+            }
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(vibecoders.leaderboardPeriod.profileLabel.uppercased())
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .kerning(1.1).foregroundStyle(Tokyo.comment)
+                    Text(vcDuration(seconds))
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(Tokyo.magenta).monospacedDigit()
+                }
+                Rectangle().fill(Tokyo.line).frame(width: 1, height: 38)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("CREW RANK")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .kerning(1.1).foregroundStyle(Tokyo.comment)
+                    Text(entry.map { "#\($0.rank)" } ?? "—")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(Tokyo.cyan)
+                }
+                Spacer(minLength: 8)
+                Button(action: shareOwnStats) {
+                    HStack(spacing: 7) {
+                        if statsCardSharing { Spinner(size: 11, color: Tokyo.bgDark) }
+                        else { Image(systemName: "square.and.arrow.up") }
+                        Text(statsCardSharing ? "Building…" : "Share card")
+                    }
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Tokyo.bgDark)
+                    .padding(.horizontal, 13).frame(minHeight: 34)
+                    .background(Tokyo.magenta,
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(statsCardSharing)
+                .help("Share your selected-period devtime as a PNG image")
+            }
+            if let range = vibecoders.leaderboardPeriodRange {
+                periodRangeLabel(range, help: vibecoders.leaderboardPeriodDescription)
+            }
+            if let statsCardError {
+                Text(statsCardError)
+                    .font(.system(size: 10, weight: .medium)).foregroundStyle(Tokyo.orange)
+            } else {
+                Text("Creates a 1200 × 630 PNG locally, then opens the macOS share sheet.")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Tokyo.comment)
+            }
+        }
+        .padding(11)
+        .background(Tokyo.magenta.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(Tokyo.magenta.opacity(0.28)))
+    }
+
+    private func shareOwnStats() {
+        guard !statsCardSharing else { return }
+        statsCardSharing = true
+        statsCardError = nil
+        Task {
+            do {
+                let data = try await vibecoders.ownStatsCardData()
+                let url = try StatsCardSharing.pngURL(for: data)
+                statsCardSharing = false
+                try StatsCardSharing.present(url)
+            } catch {
+                statsCardSharing = false
+                statsCardError = "Couldn’t share stats: \(vcFriendly(error))"
             }
         }
     }
@@ -1437,6 +1524,152 @@ enum HUDClock {
         f.dateFormat = "EEE d MMM"
         return f
     }()
+}
+
+// MARK: - Shareable Vibecoders stats card
+
+/// A social-image-sized snapshot of one user's selected-period devtime. This
+/// intentionally contains aggregate Crew stats only—never local status history,
+/// repository data, or sprint timestamps.
+struct StatsShareCard: View {
+    let data: VCStatsCardData
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Tokyo.bgDark, Tokyo.bg, Tokyo.bgHighlight],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Circle().fill(Tokyo.magenta.opacity(0.12))
+                .frame(width: 460, height: 460).offset(x: 510, y: -250)
+            Circle().fill(Tokyo.cyan.opacity(0.08))
+                .frame(width: 390, height: 390).offset(x: -530, y: 310)
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    HStack(spacing: 15) {
+                        Image(systemName: "eyes")
+                            .font(.system(size: 31, weight: .bold))
+                            .foregroundStyle(Tokyo.cyan)
+                            .frame(width: 64, height: 64)
+                            .background(Tokyo.cyan.opacity(0.13),
+                                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .strokeBorder(Tokyo.cyan.opacity(0.30), lineWidth: 2))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("GREPTILE HUD")
+                                .font(.system(size: 27, weight: .black, design: .rounded))
+                                .kerning(1.5)
+                            Text("VIBECODERS DEV STATS")
+                                .font(.system(size: 15, weight: .bold, design: .monospaced))
+                                .kerning(2.2).foregroundStyle(Tokyo.comment)
+                        }
+                    }
+                    Spacer()
+                    Text(data.period.profileLabel.uppercased())
+                        .font(.system(size: 18, weight: .black, design: .monospaced))
+                        .kerning(1.5).foregroundStyle(Tokyo.magenta)
+                        .padding(.horizontal, 22).padding(.vertical, 12)
+                        .background(Tokyo.magenta.opacity(0.13), in: Capsule())
+                        .overlay(Capsule().strokeBorder(Tokyo.magenta.opacity(0.36), lineWidth: 2))
+                }
+
+                Spacer().frame(height: 57)
+
+                Text(vcDisplayName(data.name) ?? data.login)
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                Text("@\(data.login)")
+                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Tokyo.comment)
+
+                Spacer().frame(height: 20)
+
+                Text(vcDuration(data.devtimePeriod))
+                    .font(.system(size: 88, weight: .black, design: .rounded))
+                    .foregroundStyle(Tokyo.fg).monospacedDigit()
+                    .minimumScaleFactor(0.75).lineLimit(1)
+                Text("DEVTIME · \(data.period.profileLabel.uppercased())")
+                    .font(.system(size: 17, weight: .bold, design: .monospaced))
+                    .kerning(2).foregroundStyle(Tokyo.magenta)
+
+                Spacer()
+
+                HStack(spacing: 14) {
+                    cardMetric("CREW RANK", data.rank.map { "#\($0)" } ?? "—", tone: Tokyo.cyan)
+                    cardMetric("ALL TIME", vcDuration(data.devtimeAll), tone: Tokyo.green)
+                    cardMetric("SPRINTS", "\(data.sprintCount)", tone: Tokyo.yellow)
+                }
+
+                HStack {
+                    Text(data.periodRange ?? "ALL RECORDED TIME")
+                    Spacer()
+                    Text("GOATHUD.COM  ·  \(generatedLabel)")
+                }
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .kerning(0.8).foregroundStyle(Tokyo.comment)
+                .padding(.top, 25)
+            }
+            .padding(58)
+        }
+        .frame(width: 1200, height: 630)
+        .foregroundStyle(Tokyo.fg)
+        .preferredColorScheme(.dark)
+    }
+
+    private func cardMetric(_ label: String, _ value: String, tone: Color) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(label)
+                .font(.system(size: 13, weight: .black, design: .monospaced))
+                .kerning(1.5).foregroundStyle(Tokyo.comment)
+            Text(value)
+                .font(.system(size: 27, weight: .black, design: .rounded))
+                .foregroundStyle(tone).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .padding(.horizontal, 20).padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Tokyo.bgDark.opacity(0.70),
+                    in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+            .strokeBorder(tone.opacity(0.25), lineWidth: 2))
+    }
+
+    private var generatedLabel: String {
+        data.generatedAt.formatted(date: .abbreviated, time: .shortened).uppercased()
+    }
+}
+
+@MainActor
+private enum StatsCardSharing {
+    /// Retain the picker for the lifetime of its popover.
+    private static var activePicker: NSSharingServicePicker?
+
+    static func pngURL(for data: VCStatsCardData) throws -> URL {
+        let renderer = ImageRenderer(content: StatsShareCard(data: data))
+        renderer.proposedSize = ProposedViewSize(width: 1200, height: 630)
+        renderer.scale = 1
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw VCError.failed("Couldn’t render the stats image")
+        }
+        let filename = "vibecoders-\(data.login)-\(data.period.rawValue).png"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        try png.write(to: url, options: .atomic)
+        return url
+    }
+
+    static func present(_ url: URL) throws {
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible }),
+              let view = window.contentView else {
+            throw VCError.failed("No window is available for the share sheet")
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let picker = NSSharingServicePicker(items: [url])
+        activePicker = picker
+        let anchor = NSRect(x: view.bounds.midX, y: view.bounds.maxY - 1, width: 1, height: 1)
+        picker.show(relativeTo: anchor, of: view, preferredEdge: .minY)
+    }
 }
 
 struct CrewStatusCard: View {
