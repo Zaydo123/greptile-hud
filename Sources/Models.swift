@@ -154,7 +154,30 @@ struct MergedPR: Identifiable, Equatable {
 
 // MARK: - Local statuses
 
-/// A user-authored status interval. A missing end date means its stopwatch is
+/// The only activities new sessions can start with. Stored sessions retain their
+/// original text so upgrading does not rewrite a running timer or local history.
+enum ActivityPreset: String, CaseIterable, Identifiable {
+    case workout = "🏋️", meal = "🍽️", coffee = "☕️", focus = "🎯", walk = "🚶", toilet = "🚽"
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .workout: return "Workout"
+        case .meal: return "Meal"
+        case .coffee: return "Coffee"
+        case .focus: return "Focus"
+        case .walk: return "Walk"
+        case .toilet: return "Toilet"
+        }
+    }
+
+    static func displayLabel(emoji: String, message: String) -> String {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? (ActivityPreset(rawValue: emoji)?.label ?? "Activity") : text
+    }
+}
+
+/// A locally recorded activity interval. A missing end date means its stopwatch is
 /// still running; stopped sessions become the local status history.
 struct StatusSession: Identifiable, Codable, Equatable {
     let id: UUID
@@ -164,6 +187,7 @@ struct StatusSession: Identifiable, Codable, Equatable {
     var endedAt: Date?
 
     var isActive: Bool { endedAt == nil }
+    var displayLabel: String { ActivityPreset.displayLabel(emoji: emoji, message: message) }
 }
 
 /// Local-only status stopwatch and history. The whole value is small and is
@@ -185,14 +209,9 @@ final class StatusStore: ObservableObject {
     var active: StatusSession? { sessions.first(where: \.isActive) }
     var history: [StatusSession] { sessions.filter { !$0.isActive } }
 
-    func start(emoji rawEmoji: String, message rawMessage: String, at date: Date = Date()) {
-        let trimmedEmoji = rawEmoji.trimmingCharacters(in: .whitespacesAndNewlines)
-        let emoji = trimmedEmoji.first.map(String.init) ?? ""
-        let message = String(rawMessage.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
-        guard !emoji.isEmpty || !message.isEmpty else { return }
-
+    func start(activity: ActivityPreset, at date: Date = Date()) {
         stop(at: date)
-        sessions.insert(StatusSession(id: UUID(), emoji: emoji, message: message,
+        sessions.insert(StatusSession(id: UUID(), emoji: activity.rawValue, message: activity.label,
                                       startedAt: date, endedAt: nil), at: 0)
         save()
     }

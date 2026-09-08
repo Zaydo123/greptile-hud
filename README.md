@@ -184,15 +184,18 @@ list is capped at 8 repos per refresh.
 
 ## Statuses
 
-The **Status** tab is an activity stopwatch. Pick an emoji, add an optional
-short note such as `At the gym`, and press **Start**. It keeps running until you
-stop it—there is no preset expiration—and the menu-bar eyes change to the active
-emoji while it runs.
+The **Crew** tab includes your activity stopwatch alongside the crew. Pick a
+preset to start immediately: 🏋️ Workout, 🍽️ Meal, ☕️ Coffee, 🎯 Focus, 🚶 Walk,
+or 🚽 Toilet. Click the active preset again to stop and save it; choosing another
+saves the current activity and starts the new one. Activities use fixed labels,
+with no custom emoji or message entry. Existing saved notes remain readable.
+Timers run until stopped, survive relaunches, and appear in the HUD footer and
+menu bar, where the eyes change to the active emoji.
 
 **Stop and save** records the exact start time, end time, and elapsed duration in
-the on-device history. An active status survives app relaunches. The menu-bar menu
-also shows the running status and can stop it without opening the HUD. Statuses are
-never sent to GitHub. If you have joined Vibecoders, the active emoji, note, and
+the collapsible **Activity history** inside Crew. The menu-bar menu also shows the
+running status and can stop it without opening the HUD. Statuses are never sent
+to GitHub. If you have joined Vibecoders, the active emoji, activity label, and
 start time are shared with the Crew tab until you stop it—even after you leave the
 five-minute Online list. Completed history stays only in local UserDefaults and is
 never uploaded. Without a Crew username, the entire feature remains local.
@@ -220,11 +223,13 @@ vibecoders integration with the `backend/` service:
   UserDefaults, cleared by "Forget username").
 - **Online now** — who's been active in the last 5 minutes, with today's
   devtime.
-- **Crew statuses** — active emoji + note stopwatches remain visible even while
-  someone is away from their keyboard; completed status history is never uploaded.
+- **Crew statuses** — activity cards with preset accents, elapsed timers, and
+  separate Online/Away indicators remain visible even while someone is away from
+  their keyboard; completed status history is never uploaded.
 - **Shareable stats cards** — choose Today, Week, Month, or All time and export
-  your latest devtime, Crew rank, all-time total, and sprint count as a polished
-  1200 × 630 PNG through the macOS share sheet. The image is rendered locally.
+  your latest devtime, Crew rank, all-time total, and sprint count in a two-column
+  flight-log layout as a polished 1200 × 630 PNG through the macOS share sheet.
+  The image is rendered locally.
 - **Leaderboard and profiles** — Today, Week, and Month activity with visible
   Central Time date ranges, rankings, sprint maps, exact sprint rows, join dates, and
   last-online times. Hovering a sprint-map block shows its active duration and
@@ -234,7 +239,7 @@ vibecoders integration with the `backend/` service:
   devtime (this replaces the standalone `backend/client/devtime.sh` agent if
   you run the HUD app). The heartbeat sends only your username, the app name,
   and a timestamp — no code, no keystrokes, no repo data. If you explicitly start
-  a status, its emoji, note, and start time are also shared until you stop it.
+  a status, its emoji, activity label, and start time are also shared until you stop it.
 
 Menu-bar: Vibecoders ▸ Join the devtime leaderboard, Online now, Leaderboard,
 Refresh, Change username, Forget username.

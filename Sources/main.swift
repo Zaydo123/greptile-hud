@@ -123,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let emoji = status.emoji.isEmpty ? "●" : status.emoji
-        let message = status.message.isEmpty ? "Status" : status.message
+        let message = status.displayLabel
         let current = NSMenuItem(title: "\(emoji) \(message) — \(hudDuration(status.startedAt, Date()))",
                                  action: nil, keyEquivalent: "")
         current.isEnabled = false
@@ -476,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let status = statuses.active {
             button.image = nil
             button.title = status.emoji.isEmpty ? "●" : status.emoji
-            let message = status.message.isEmpty ? "Status" : status.message
+            let message = status.displayLabel
             button.toolTip = "\(button.title) \(message) — running locally"
         } else {
             button.title = ""

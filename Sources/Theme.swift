@@ -38,6 +38,19 @@ enum Tokyo {
     static let border = hex(0x3B4261)
     static let line = hex(0x2F334D)
 
+    /// Consistent accents for local presets and shared Crew activities.
+    static func activity(_ emoji: String) -> Color {
+        switch ActivityPreset(rawValue: emoji) {
+        case .workout: return orange
+        case .meal: return yellow
+        case .coffee: return magenta
+        case .focus: return cyan
+        case .walk: return green
+        case .toilet: return blue
+        case nil: return yellow
+        }
+    }
+
     /// Raised row / card fill. `level` walks from a barely-there wash (0) to a
     /// hovered, clearly-lifted surface (3).
     static func surface(_ level: Int) -> Color {

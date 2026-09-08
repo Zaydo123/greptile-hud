@@ -85,6 +85,8 @@ struct VCCrewStatus: Codable, Equatable, Identifiable {
 
     var id: String { login.lowercased() }
 
+    var displayLabel: String { ActivityPreset.displayLabel(emoji: emoji, message: message) }
+
     enum CodingKeys: String, CodingKey {
         case login, name, emoji, message, online
         case startedAt = "started_at"
