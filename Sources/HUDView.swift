@@ -286,7 +286,7 @@ struct HUDView: View {
     @State private var usernameDraft = ""
     @State private var statsCardSharing = false
     @State private var statsCardError: String?
-    private enum Tab { case open, train, merged, status, crew }
+    private enum Tab { case open, train, merged, crew }
 
     private static let staleThreshold: TimeInterval = 14 * 86400
 
@@ -515,7 +515,7 @@ struct HUDView: View {
                 TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                     HStack(spacing: 5) {
                         Text(status.emoji.isEmpty ? "●" : status.emoji)
-                        Text(status.message.isEmpty ? "STATUS" : status.message.uppercased())
+                        Text(status.displayLabel.uppercased())
                             .lineLimit(1)
                         Text(hudDuration(status.startedAt, ctx.date))
                             .monospacedDigit()
@@ -551,14 +551,11 @@ struct HUDView: View {
         case .open:   openContent
         case .train:  TrainTab(store: store)
         case .merged: mergedContent
-        case .status: StatusesView(store: statuses, vibecoders: vibecoders,
-                                   onEditing: onTextEditing,
-                                   onChanged: onStatusChanged)
         case .crew:   crewContent
         }
     }
 
-    // Segmented Open / Train / Merged / Status / Crew switcher for the main list.
+    // Segmented Open / Train / Merged / Crew switcher for the main list.
     private var tabBar: some View {
         HStack(spacing: 4) {
             tabButton("Open", icon: "arrow.triangle.branch", count: store.prs.count, on: tab == .open) {
@@ -570,10 +567,6 @@ struct HUDView: View {
             }
             tabButton("Merged", icon: "arrow.triangle.merge", count: store.merged.count, on: tab == .merged) {
                 showOverview(.merged)
-            }
-            tabButton("Status", icon: "face.smiling", count: statuses.active == nil ? 0 : 1,
-                      on: tab == .status, accent: Tokyo.yellow) {
-                showOverview(.status)
             }
             tabButton("Crew", icon: "person.3", count: vibecoders.online.count, on: tab == .crew,
                       accent: Tokyo.magenta) {
@@ -731,61 +724,68 @@ struct HUDView: View {
     // MARK: Crew tab (vibecoders)
 
     @ViewBuilder private var crewContent: some View {
-        if !vibecoders.hasUsername {
-            VStack(spacing: 14) {
-                Image(systemName: "person.3")
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(Tokyo.magenta)
-                    .frame(width: 56, height: 56)
-                    .background(Tokyo.magenta.opacity(0.13), in: Circle())
-                Text("Join the vibecoders leaderboard")
-                    .font(.system(size: 14, weight: .semibold))
-                Text("Pick a username and your devtime starts counting the moment\nan editor is open. No GitHub sign-in, no tokens — we trust you.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Tokyo.comment)
-                    .multilineTextAlignment(.center)
-                HUDTextField(text: $usernameDraft,
-                             placeholder: "username",
-                             onEditing: onTextEditing,
-                             onSubmit: joinCrew)
-                    .frame(width: 220, height: 36)
-                    .padding(.horizontal, 8)
-                    .background(Tokyo.bgDark.opacity(0.8), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Tokyo.stroke(true)))
-                Button {
-                    joinCrew()
-                } label: {
-                    Text("Join the crew")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Tokyo.bgDark)
-                        .padding(.horizontal, 18).padding(.vertical, 10)
-                        .background(Tokyo.magenta,
-                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                if let err = vibecoders.errorText {
-                    Text(err).font(.system(size: 11)).foregroundStyle(Tokyo.orange)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        if vibecoders.hasUsername && vibecoders.selectedProfileLogin != nil {
+            crewProfileContent
         } else {
-            if vibecoders.selectedProfileLogin != nil {
-                crewProfileContent
-            } else {
-                ScrollView {
-                    VStack(spacing: 14) {
-                        myStatsShareBlock
+            ScrollView {
+                VStack(spacing: 14) {
+                    StatusesView(store: statuses, vibecoders: vibecoders,
+                                 onChanged: onStatusChanged)
+                    if vibecoders.hasUsername {
                         if !vibecoders.crewStatuses.isEmpty { crewStatusStrip }
                         onlineStrip
+                        myStatsShareBlock
                         leaderboardBlock
+                    } else {
+                        crewJoinContent
                     }
-                    .padding(12)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var crewJoinContent: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "person.3")
+                .font(.system(size: 26, weight: .medium))
+                .foregroundStyle(Tokyo.magenta)
+                .frame(width: 56, height: 56)
+                .background(Tokyo.magenta.opacity(0.13), in: Circle())
+            Text("Join the vibecoders leaderboard")
+                .font(.system(size: 14, weight: .semibold))
+            Text("Pick a username and your devtime starts counting the moment\nan editor is open. No GitHub sign-in, no tokens — we trust you.")
+                .font(.system(size: 12))
+                .foregroundStyle(Tokyo.comment)
+                .multilineTextAlignment(.center)
+            HUDTextField(text: $usernameDraft,
+                         placeholder: "username",
+                         onEditing: onTextEditing,
+                         onSubmit: joinCrew)
+                .frame(width: 220, height: 36)
+                .padding(.horizontal, 8)
+                .background(Tokyo.bgDark.opacity(0.8), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Tokyo.stroke(true)))
+            Button {
+                joinCrew()
+            } label: {
+                Text("Join the crew")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Tokyo.bgDark)
+                    .padding(.horizontal, 18).padding(.vertical, 10)
+                    .background(Tokyo.magenta,
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if let err = vibecoders.errorText {
+                Text(err).font(.system(size: 11)).foregroundStyle(Tokyo.orange)
             }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
     }
 
     private var myStatsShareBlock: some View {
@@ -930,7 +930,7 @@ struct HUDView: View {
                                     if let status = crewStatus(for: u.login) {
                                         Text(status.emoji.isEmpty ? "●" : status.emoji)
                                             .font(.system(size: 11))
-                                            .help(status.message.isEmpty ? "Status running" : status.message)
+                                            .help(status.displayLabel)
                                     }
                                     Text(vcDuration(u.devtimeToday))
                                         .font(.system(size: 10, weight: .medium))
@@ -1177,7 +1177,7 @@ struct HUDView: View {
         HStack(spacing: 9) {
             Text(status.emoji.isEmpty ? "●" : status.emoji).font(.system(size: 14)).frame(width: 16)
             Text("Status").font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokyo.comment)
-            Text(status.message.isEmpty ? "Status" : status.message)
+            Text(status.displayLabel)
                 .font(.system(size: 11, weight: .semibold)).lineLimit(1)
             Spacer(minLength: 8)
             TimelineView(.periodic(from: Date(), by: 1)) { ctx in
@@ -1572,24 +1572,41 @@ struct StatsShareCard: View {
                         .overlay(Capsule().strokeBorder(Tokyo.magenta.opacity(0.36), lineWidth: 2))
                 }
 
-                Spacer().frame(height: 57)
+                HStack(spacing: 30) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("CREW FLIGHT LOG")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .kerning(2).foregroundStyle(Tokyo.cyan)
+                        Text(vcDisplayName(data.name) ?? data.login)
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .lineLimit(2).minimumScaleFactor(0.7)
+                        Text("@\(data.login)")
+                            .font(.system(size: 17, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Tokyo.fgDim).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(vcDisplayName(data.name) ?? data.login)
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .lineLimit(1)
-                Text("@\(data.login)")
-                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Tokyo.comment)
+                    Rectangle().fill(Tokyo.magenta.opacity(0.4)).frame(width: 2)
 
-                Spacer().frame(height: 20)
-
-                Text(vcDuration(data.devtimePeriod))
-                    .font(.system(size: 88, weight: .black, design: .rounded))
-                    .foregroundStyle(Tokyo.fg).monospacedDigit()
-                    .minimumScaleFactor(0.75).lineLimit(1)
-                Text("DEVTIME · \(data.period.profileLabel.uppercased())")
-                    .font(.system(size: 17, weight: .bold, design: .monospaced))
-                    .kerning(2).foregroundStyle(Tokyo.magenta)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("DEVTIME · \(data.period.profileLabel.uppercased())")
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                            .kerning(1.5).foregroundStyle(Tokyo.magenta)
+                        Text(vcDuration(data.devtimePeriod))
+                            .font(.system(size: 76, weight: .black, design: .rounded))
+                            .foregroundStyle(Tokyo.fg).monospacedDigit()
+                            .minimumScaleFactor(0.5).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(28)
+                .frame(height: 200)
+                .background(LinearGradient(colors: [Tokyo.magenta.opacity(0.12), Tokyo.cyan.opacity(0.05)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(Tokyo.magenta.opacity(0.25), lineWidth: 2))
+                .padding(.top, 30)
 
                 Spacer()
 
@@ -1674,39 +1691,66 @@ private enum StatsCardSharing {
 
 struct CrewStatusCard: View {
     let status: VCCrewStatus
+    @State private var hovered = false
+
+    private var accent: Color { Tokyo.activity(status.emoji) }
 
     var body: some View {
-        HStack(spacing: 9) {
-            Text(status.emoji.isEmpty ? "●" : status.emoji)
-                .font(.system(size: 21)).frame(width: 36, height: 36)
-                .background(Tokyo.yellow.opacity(0.13),
-                            in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text(vcDisplayName(status.name) ?? status.login)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Tokyo.fgDim).lineLimit(1)
+                Spacer(minLength: 4)
+                HStack(spacing: 4) {
                     Circle().fill(status.online ? Tokyo.green : Tokyo.comment)
                         .frame(width: 5, height: 5)
-                    Text(vcDisplayName(status.name) ?? status.login)
-                        .font(.system(size: 11, weight: .bold)).lineLimit(1)
+                    Text(status.online ? "ONLINE" : "AWAY")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Tokyo.fgDim)
                 }
-                Text(status.message.isEmpty ? "Status" : status.message)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Tokyo.fgDim).lineLimit(1)
-                TimelineView(.periodic(from: Date(), by: 1)) { ctx in
-                    Text(hudDuration(status.startedAt, ctx.date))
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Tokyo.yellow).monospacedDigit()
-                }
+                .fixedSize()
             }
-            Spacer(minLength: 0)
+            HStack(spacing: 12) {
+                Text(status.emoji.isEmpty ? "●" : status.emoji)
+                    .font(.system(size: 32)).frame(width: 58, height: 58)
+                    .background(accent.opacity(0.13),
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(accent.opacity(0.3)))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(status.displayLabel)
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(Tokyo.fg).lineLimit(2)
+                    Text("ACTIVITY RUNNING")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .kerning(0.7).foregroundStyle(accent)
+                }
+                Spacer(minLength: 0)
+            }
+            Rectangle().fill(accent.opacity(0.2)).frame(height: 1)
+            HStack {
+                TimelineView(.periodic(from: Date(), by: 1)) { ctx in
+                    Label(hudDuration(status.startedAt, ctx.date), systemImage: "stopwatch")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(accent).monospacedDigit()
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Tokyo.fgDim)
+            }
         }
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .frame(width: 210, alignment: .leading)
-        .frame(minHeight: 58)
-        .background(Tokyo.surface(1),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(Tokyo.yellow.opacity(0.22)))
+        .padding(14)
+        .frame(width: 260, alignment: .leading)
+        .background(LinearGradient(colors: [Tokyo.surface(hovered ? 3 : 2), accent.opacity(0.07)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .strokeBorder(accent.opacity(hovered ? 0.6 : 0.28)))
         .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1715,138 +1759,69 @@ struct CrewStatusCard: View {
 struct StatusesView: View {
     @ObservedObject var store: StatusStore
     @ObservedObject var vibecoders: VibecodersStore
-    var onEditing: (Bool) -> Void = { _ in }
     var onChanged: () -> Void = {}
 
-    @State private var emoji = ""
-    @State private var message = ""
-
-    private let suggestedEmoji = ["🏋️", "🍽️", "☕️", "🎯", "🚶"]
+    @State private var showHistory = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if let active = store.active {
-                    activeCard(active)
-                } else {
-                    composer
-                }
-                sharingState
+        VStack(alignment: .leading, spacing: 12) {
+            composer
+            if let active = store.active { activeCard(active) }
+            sharingState
 
-                HStack(spacing: 7) {
-                    sectionLabel("History")
-                    if !store.history.isEmpty {
-                        Text("\(store.history.count)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Tokyo.comment)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Tokyo.surface(1), in: Capsule())
-                    }
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { showHistory.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "clock.arrow.circlepath")
+                    Text("Activity history")
+                    Text("\(store.history.count)").foregroundStyle(Tokyo.yellow)
                     Spacer()
                     Text("LOCAL ONLY")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .kerning(1)
                         .foregroundStyle(Tokyo.comment)
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(showHistory ? 90 : 0))
                 }
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Tokyo.fgDim)
+                .padding(.horizontal, 12).frame(minHeight: 40)
+                .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 10))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Activity history, \(store.history.count) completed")
+            .accessibilityValue(showHistory ? "Expanded" : "Collapsed")
 
+            if showHistory {
                 if store.history.isEmpty {
-                    VStack(spacing: 9) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 21, weight: .medium))
-                            .foregroundStyle(Tokyo.comment)
-                            .frame(width: 44, height: 44)
-                            .background(Tokyo.surface(0), in: Circle())
-                            .overlay(Circle().strokeBorder(Tokyo.stroke()))
-                        Text("Stopped statuses will appear here")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Tokyo.fgDim)
-                        Text("Completed history stays on this Mac.")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Tokyo.comment)
-                    }
-                    .frame(maxWidth: .infinity).padding(.vertical, 26)
+                    Text("Stopped activities appear here. Completed history stays on this Mac.")
+                        .font(.system(size: 11)).foregroundStyle(Tokyo.comment)
+                        .padding(12)
                 } else {
                     LazyVStack(spacing: 8) {
-                        ForEach(store.history) { session in
-                            StatusHistoryRow(session: session)
-                        }
+                        ForEach(store.history) { StatusHistoryRow(session: $0) }
                     }
                 }
             }
-            .padding(12)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Start a status")
-                        .font(.system(size: 14, weight: .bold))
-                    Text("A stopwatch that runs until you stop it.")
-                        .font(.system(size: 11)).foregroundStyle(Tokyo.comment)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Your activity").font(.system(size: 14, weight: .bold))
+                    Text("Pick to start · pick again to stop · switch anytime")
+                        .font(.system(size: 11)).foregroundStyle(Tokyo.fgDim)
                 }
                 Spacer()
-                Image(systemName: "stopwatch.fill")
-                    .font(.system(size: 16, weight: .semibold)).foregroundStyle(Tokyo.yellow)
+                Image(systemName: "stopwatch.fill").foregroundStyle(Tokyo.yellow)
             }
-
-            HStack(spacing: 9) {
-                HUDTextField(text: $emoji,
-                             placeholder: "🙂",
-                             fontSize: 22,
-                             alignment: .center,
-                             maximumCharacters: 1,
-                             onEditing: onEditing,
-                             onSubmit: start)
-                    .frame(width: 48, height: 40)
-                    .background(Tokyo.bgDark.opacity(0.8),
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Tokyo.stroke(true)))
-
-                HUDTextField(text: $message,
-                             placeholder: "What are you up to?",
-                             maximumCharacters: 80,
-                             onEditing: onEditing,
-                             onSubmit: start)
-                    .frame(maxWidth: .infinity, minHeight: 40)
-                    .padding(.horizontal, 10)
-                    .background(Tokyo.bgDark.opacity(0.8),
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Tokyo.stroke(true)))
-
-                Button(action: start) {
-                    Label("Start", systemImage: "play.fill")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Tokyo.bgDark)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 40)
-                        .background(canStart ? Tokyo.green : Tokyo.terminalBlack,
-                                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        .contentShape(Rectangle())
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 8)], spacing: 8) {
+                ForEach(ActivityPreset.allCases) { activity in
+                    presetButton(activity)
                 }
-                .buttonStyle(.plain)
-                .disabled(!canStart)
-            }
-
-            HStack(spacing: 7) {
-                Text("QUICK")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .kerning(1).foregroundStyle(Tokyo.comment)
-                ForEach(suggestedEmoji, id: \.self) { item in
-                    Button(item) { emoji = item }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 16))
-                        .frame(width: 30, height: 28)
-                        .background(emoji == item ? Tokyo.yellow.opacity(0.15) : Tokyo.surface(1),
-                                    in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(emoji == item ? Tokyo.yellow.opacity(0.4) : Tokyo.stroke()))
-                }
-                Spacer()
             }
         }
         .padding(14)
@@ -1856,16 +1831,48 @@ struct StatusesView: View {
             .strokeBorder(Tokyo.yellow.opacity(0.30)))
     }
 
+    private func presetButton(_ activity: ActivityPreset) -> some View {
+        let selected = store.active?.emoji == activity.rawValue
+        let accent = Tokyo.activity(activity.rawValue)
+        return Button {
+            if store.active?.emoji == activity.rawValue { store.stop() }
+            else { store.start(activity: activity) }
+            vibecoders.publishStatus(store.active)
+            onChanged()
+        } label: {
+            VStack(spacing: 5) {
+                Text(activity.rawValue).font(.system(size: 24))
+                HStack(spacing: 4) {
+                    if selected { Image(systemName: "stop.circle.fill") }
+                    Text(activity.label)
+                }
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(selected ? accent : Tokyo.fgDim)
+            }
+            .frame(maxWidth: .infinity, minHeight: 68)
+            .background(selected ? accent.opacity(0.15) : Tokyo.surface(1),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(selected ? accent.opacity(0.6) : Tokyo.stroke()))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(selected ? "Stop" : "Start") \(activity.label)")
+        .accessibilityValue(selected ? "Running" : "Inactive")
+        .help(selected ? "Stop and save \(activity.label)" : "Start \(activity.label); saves any running activity")
+    }
+
     private func activeCard(_ session: StatusSession) -> some View {
-        VStack(spacing: 13) {
+        let accent = Tokyo.activity(session.emoji)
+        return VStack(spacing: 13) {
             HStack(spacing: 13) {
                 Text(session.emoji.isEmpty ? "●" : session.emoji)
                     .font(.system(size: 31))
                     .frame(width: 54, height: 54)
-                    .background(Tokyo.yellow.opacity(0.14),
+                    .background(accent.opacity(0.14),
                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Tokyo.yellow.opacity(0.28)))
+                        .strokeBorder(accent.opacity(0.28)))
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
@@ -1874,7 +1881,7 @@ struct StatusesView: View {
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
                             .kerning(1).foregroundStyle(Tokyo.green)
                     }
-                    Text(session.message.isEmpty ? "Status" : session.message)
+                    Text(session.displayLabel)
                         .font(.system(size: 16, weight: .bold)).lineLimit(2)
                     Text("Started \(session.startedAt.formatted(date: .omitted, time: .shortened))")
                         .font(.system(size: 10, weight: .medium)).foregroundStyle(Tokyo.comment)
@@ -1883,7 +1890,7 @@ struct StatusesView: View {
                 TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                     Text(hudDuration(session.startedAt, ctx.date))
                         .font(.system(size: 19, weight: .bold, design: .monospaced))
-                        .monospacedDigit().foregroundStyle(Tokyo.yellow)
+                        .monospacedDigit().foregroundStyle(accent)
                 }
                 .fixedSize()
             }
@@ -1891,7 +1898,6 @@ struct StatusesView: View {
             Button {
                 store.stop()
                 vibecoders.publishStatus(nil)
-                onEditing(false)
                 onChanged()
             } label: {
                 Label("Stop and save", systemImage: "stop.fill")
@@ -1905,25 +1911,10 @@ struct StatusesView: View {
             .help("Stop the timer and add this period to history")
         }
         .padding(14)
-        .background(Tokyo.yellow.opacity(0.07),
+        .background(accent.opacity(0.07),
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Tokyo.yellow.opacity(0.34)))
-    }
-
-    private var canStart: Bool {
-        !emoji.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-        !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private func start() {
-        guard canStart else { return }
-        store.start(emoji: emoji, message: message)
-        vibecoders.publishStatus(store.active)
-        emoji = ""
-        message = ""
-        onEditing(false)
-        onChanged()
+            .strokeBorder(accent.opacity(0.34)))
     }
 
     @ViewBuilder private var sharingState: some View {
@@ -1954,13 +1945,6 @@ struct StatusesView: View {
                 .font(.system(size: 10, weight: .semibold)).foregroundStyle(Tokyo.comment)
         }
     }
-
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(Tokyo.comment)
-            .kerning(1.2)
-    }
 }
 
 struct StatusHistoryRow: View {
@@ -1973,7 +1957,7 @@ struct StatusHistoryRow: View {
                 .background(Tokyo.surface(1),
                             in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 4) {
-                Text(session.message.isEmpty ? "Status" : session.message)
+                Text(session.displayLabel)
                     .font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 if let endedAt = session.endedAt {
                     Text(timeRange(to: endedAt))
