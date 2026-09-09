@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hideToken = 0
     private var updateCheckTimer: Timer?
     private var vibecodersTimer: Timer?
+    private var statusGuardTimer: Timer?
 
     private var rightShiftDown = false
     private var latchTimer: Timer?
@@ -60,6 +61,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         vibecodersTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.vibecoders.heartbeatIfActive()
             Task { await self?.vibecoders.refresh() }
+        }
+        // Auto-stop guard: end Focus when the user goes idle, and end ANY
+        // activity that has run past the 8-hour cap. Runs on a short interval so
+        // a walk-away doesn't keep accruing focus time for long.
+        statusGuardTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let idle = VibecodersStore.secondsSinceLastInput()
+            let stopped = self.statuses.applyAutoStop(now: Date(),
+                                                      idleSeconds: idle,
+                                                      idleCutoff: VibecodersStore.presenceCutoff)
+            if stopped != nil {
+                self.vibecoders.publishStatus(self.statuses.active)
+                self.updateStatusItemButton()
+            }
         }
     }
 
