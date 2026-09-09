@@ -187,8 +187,16 @@ list is capped at 8 repos per refresh.
 The **Crew** tab includes your activity stopwatch alongside the crew. Pick a
 preset to start immediately: 🏋️ Workout, 🍽️ Meal, ☕️ Coffee, 🎯 Focus, 🚶 Walk,
 or 🚽 Toilet. Click the active preset again to stop and save it; choosing another
-saves the current activity and starts the new one. Activities use fixed labels,
-with no custom emoji or message entry. Existing saved notes remain readable.
+saves the current activity and starts the new one. Activities start with fixed
+labels and no custom emoji entry, but you can rename any activity's label
+inline (pencil icon on the running card or a history row) afterwards.
+
+**Auto-stop rules** keep accidentally-left timers from running forever:
+- **Focus** stops on its own once you're idle (no keyboard/mouse input) past
+  the presence window, so a walk-away doesn't keep accruing focus time.
+- Any activity (Focus, Coffee, etc.) auto-stops after **8 hours** and must be
+  restarted explicitly.
+
 Timers run until stopped, survive relaunches, and appear in the HUD footer and
 menu bar, where the eyes change to the active emoji.
 

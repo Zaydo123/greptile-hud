@@ -1762,6 +1762,8 @@ struct StatusesView: View {
     var onChanged: () -> Void = {}
 
     @State private var showHistory = false
+    @State private var editingRename = ""
+    @State private var renameTarget: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1800,7 +1802,21 @@ struct StatusesView: View {
                         .padding(12)
                 } else {
                     LazyVStack(spacing: 8) {
-                        ForEach(store.history) { StatusHistoryRow(session: $0) }
+                        ForEach(store.history) { session in
+                            if renameTarget == session.id {
+                                editRenameField(session)
+                                    .padding(.horizontal, 11).padding(.vertical, 8)
+                                    .background(Tokyo.surface(0),
+                                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .strokeBorder(Tokyo.stroke()))
+                            } else {
+                                StatusHistoryRow(session: session) {
+                                    editingRename = session.message
+                                    renameTarget = session.id
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1881,10 +1897,31 @@ struct StatusesView: View {
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
                             .kerning(1).foregroundStyle(Tokyo.green)
                     }
-                    Text(session.displayLabel)
-                        .font(.system(size: 16, weight: .bold)).lineLimit(2)
+                    if renameTarget == session.id {
+                        editRenameField(session)
+                    } else {
+                        HStack(spacing: 6) {
+                            Text(session.displayLabel)
+                                .font(.system(size: 16, weight: .bold)).lineLimit(2)
+                            Button {
+                                editingRename = session.message
+                                renameTarget = session.id
+                            } label: {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Tokyo.fgDim)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Edit activity label")
+                            .accessibilityLabel("Edit activity label")
+                        }
+                    }
                     Text("Started \(session.startedAt.formatted(date: .omitted, time: .shortened))")
                         .font(.system(size: 10, weight: .medium)).foregroundStyle(Tokyo.comment)
+                    if session.requiresPresence {
+                        Text("Focus stops when you're idle")
+                            .font(.system(size: 9, weight: .medium)).foregroundStyle(Tokyo.orange)
+                    }
                 }
                 Spacer(minLength: 8)
                 TimelineView(.periodic(from: Date(), by: 1)) { ctx in
@@ -1915,6 +1952,40 @@ struct StatusesView: View {
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
             .strokeBorder(accent.opacity(0.34)))
+    }
+
+    @ViewBuilder private func editRenameField(_ session: StatusSession) -> some View {
+        HStack(spacing: 6) {
+            HUDTextField(text: $editingRename,
+                         placeholder: session.message.isEmpty ? "Activity label" : session.message,
+                         fontSize: 14,
+                         onSubmit: commitRename(session))
+                .frame(width: 150)
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(Tokyo.surface(1),
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Button("Save") { commitRename(session) }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .bold)).foregroundStyle(Tokyo.yellow)
+            Button {
+                renameTarget = nil
+                editingRename = ""
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11)).foregroundStyle(Tokyo.fgDim)
+            }.buttonStyle(.plain)
+        }
+    }
+
+    private func commitRename(_ session: StatusSession) {
+        let wasActive = store.active?.id == session.id
+        store.setMessage(session.id, to: editingRename)
+        // Only re-share when the RUNNING status's label changed; editing a
+        // completed history row is local-only and must not touch the server.
+        if wasActive { vibecoders.publishStatus(store.active) }
+        onChanged()
+        renameTarget = nil
+        editingRename = ""
     }
 
     @ViewBuilder private var sharingState: some View {
@@ -1949,6 +2020,7 @@ struct StatusesView: View {
 
 struct StatusHistoryRow: View {
     let session: StatusSession
+    var onEdit: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 11) {
@@ -1971,6 +2043,14 @@ struct StatusHistoryRow: View {
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .monospacedDigit().foregroundStyle(Tokyo.yellow)
             }
+            Button(action: onEdit) {
+                Image(systemName: "pencil")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Tokyo.fgDim)
+            }
+            .buttonStyle(.plain)
+            .help("Edit activity label")
+            .accessibilityLabel("Edit activity label")
         }
         .padding(.horizontal, 11)
         .frame(minHeight: 56)

@@ -171,6 +171,12 @@ enum ActivityPreset: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Activities whose time should only count while the user is actually at
+    /// the computer. When such an activity is running and the user goes idle
+    /// past the presence cutoff, the countdown is auto-stopped so a walk-away
+    /// doesn't keep accruing focus time.
+    var requiresPresence: Bool { self == .focus }
+
     static func displayLabel(emoji: String, message: String) -> String {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? (ActivityPreset(rawValue: emoji)?.label ?? "Activity") : text
@@ -182,12 +188,15 @@ enum ActivityPreset: String, CaseIterable, Identifiable {
 struct StatusSession: Identifiable, Codable, Equatable {
     let id: UUID
     let emoji: String
-    let message: String
+    var message: String
     let startedAt: Date
     var endedAt: Date?
 
     var isActive: Bool { endedAt == nil }
     var displayLabel: String { ActivityPreset.displayLabel(emoji: emoji, message: message) }
+    /// True when this session's preset should stop counting once the user is
+    /// idle (e.g. Focus) — used by the auto-stop guard.
+    var requiresPresence: Bool { ActivityPreset(rawValue: emoji)?.requiresPresence ?? false }
 }
 
 /// Local-only status stopwatch and history. The whole value is small and is
@@ -220,6 +229,38 @@ final class StatusStore: ObservableObject {
         guard let index = sessions.firstIndex(where: \.isActive) else { return }
         sessions[index].endedAt = max(date, sessions[index].startedAt)
         save()
+    }
+
+    /// Maximum wall-clock a single activity may run before it is auto-stopped,
+    /// so a forgotten timer (e.g. coffee) doesn't keep running for days.
+    static let maxDuration: TimeInterval = 8 * 60 * 60
+
+    /// Edit the label/message of a stored session (running or history).
+    func setMessage(_ id: UUID, to message: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        // Keep the same emoji/activity; only change the human label. A blank
+        // label falls back to the preset's default display name.
+        sessions[index].message = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        save()
+    }
+
+    /// Auto-stop rules run by a periodic guard:
+    /// - an activity may run at most `maxDuration` (8h) — anything past that is
+    ///   stopped so people don't forget to turn it off, and must be restarted.
+    /// - a presence-sensitive activity (Focus) stops as soon as the user has
+    ///   been idle longer than `idleCutoff`.
+    /// Returns the session's id if it was auto-stopped (so the caller can clear
+    /// the shared status), else nil.
+    @discardableResult
+    func applyAutoStop(now: Date = Date(), idleSeconds: TimeInterval, idleCutoff: TimeInterval) -> UUID? {
+        guard let index = sessions.firstIndex(where: \.isActive) else { return nil }
+        let session = sessions[index]
+        let exceedsDuration = now.timeIntervalSince(session.startedAt) >= Self.maxDuration
+        let idleTooLong = session.requiresPresence && idleSeconds >= idleCutoff
+        guard exceedsDuration || idleTooLong else { return nil }
+        sessions[index].endedAt = now
+        save()
+        return session.id
     }
 
     private func save() {
