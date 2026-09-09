@@ -1959,7 +1959,7 @@ struct StatusesView: View {
             HUDTextField(text: $editingRename,
                          placeholder: session.message.isEmpty ? "Activity label" : session.message,
                          fontSize: 14,
-                         onSubmit: commitRename(session))
+                         onSubmit: { commitRename(session) })
                 .frame(width: 150)
                 .padding(.horizontal, 6).padding(.vertical, 3)
                 .background(Tokyo.surface(1),
