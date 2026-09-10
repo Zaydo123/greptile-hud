@@ -73,6 +73,12 @@ export DATABASE_URL=postgres://localhost:5432/vibecoders
 go run .
 ```
 
+Run the unit tests (pure logic, no database needed) with:
+
+```bash
+go test ./...
+```
+
 No GitHub app, no secrets, no tokens.
 
 ## Deploying on Render
