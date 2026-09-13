@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -18,7 +17,7 @@ func TestNormalizeLogin(t *testing.T) {
 		{name: "allows hyphen and underscore inside", raw: "a-b_c", want: "a-b_c"},
 		{name: "allows digits", raw: "zayd123", want: "zayd123"},
 		{name: "allows single character", raw: "x", want: "x"},
-		{name: "allows max length", raw: strings.Repeat("a", 32), want: strings.Repeat("a", 32)},
+		{name: "allows max length", raw: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", want: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		{name: "rejects empty", raw: "", want: ""},
 		{name: "rejects whitespace only", raw: "   ", want: ""},
 		{name: "rejects bare @", raw: "@", want: ""},
@@ -27,7 +26,7 @@ func TestNormalizeLogin(t *testing.T) {
 		{name: "rejects leading hyphen", raw: "-abc", want: ""},
 		{name: "rejects leading underscore", raw: "_abc", want: ""},
 		{name: "rejects invalid characters", raw: "zayd!", want: ""},
-		{name: "rejects too long", raw: strings.Repeat("a", 33), want: ""},
+		{name: "rejects too long", raw: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", want: ""},
 	}
 
 	for _, tt := range tests {
