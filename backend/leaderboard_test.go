@@ -1,32 +1,35 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
 func TestNormalizeLogin(t *testing.T) {
+	a32 := strings.Repeat("a", 32)
+	a33 := strings.Repeat("a", 33)
 	tests := []struct {
 		name string
 		raw  string
 		want string
 	}{
 		{name: "valid plain name", raw: "zayd", want: "zayd"},
-		{name: "trims surrounding whitespace", raw: "  Zayd123  ", want: "Zayd123"},
-		{name: "strips one leading @", raw: "@zayd", want: "zayd"},
-		{name: "strips whitespace after @", raw: "@ zayd", want: "zayd"},
-		{name: "allows hyphen and underscore inside", raw: "a-b_c", want: "a-b_c"},
-		{name: "allows digits", raw: "zayd123", want: "zayd123"},
-		{name: "allows single character", raw: "x", want: "x"},
-		{name: "allows max length", raw: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", want: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-		{name: "rejects empty", raw: "", want: ""},
-		{name: "rejects whitespace only", raw: "   ", want: ""},
-		{name: "rejects bare @", raw: "@", want: ""},
-		{name: "rejects doubled @", raw: "@@zayd", want: ""},
-		{name: "rejects @ inside", raw: "a@b", want: ""},
-		{name: "rejects leading hyphen", raw: "-abc", want: ""},
-		{name: "rejects leading underscore", raw: "_abc", want: ""},
-		{name: "rejects invalid characters", raw: "zayd!", want: ""},
-		{name: "rejects too long", raw: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", want: ""},
+		{name: "trims", raw: "  Zayd123  ", want: "Zayd123"},
+		{name: "leading @", raw: "@zayd", want: "zayd"},
+		{name: "@ then space", raw: "@ zayd", want: "zayd"},
+		{name: "inner - and _", raw: "a-b_c", want: "a-b_c"},
+		{name: "digits", raw: "zayd123", want: "zayd123"},
+		{name: "single char", raw: "x", want: "x"},
+		{name: "max length", raw: a32, want: a32},
+		{name: "empty", raw: "", want: ""},
+		{name: "whitespace", raw: "   ", want: ""},
+		{name: "bare @", raw: "@", want: ""},
+		{name: "double @", raw: "@@zayd", want: ""},
+		{name: "@ inside", raw: "a@b", want: ""},
+		{name: "leading -", raw: "-abc", want: ""},
+		{name: "leading _", raw: "_abc", want: ""},
+		{name: "invalid char", raw: "zayd!", want: ""},
+		{name: "too long", raw: a33, want: ""},
 	}
 
 	for _, tt := range tests {
