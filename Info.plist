@@ -6,6 +6,10 @@
     <string>GreptileHUD</string>
     <key>CFBundleDisplayName</key>
     <string>Greptile HUD</string>
+    <key>CFBundleDescription</key>
+    <string>A menu-bar overlay for your pull requests, review trains, and devtime crew.</string>
+    <key>CFBundleIconFile</key>
+    <string>GreptileHUD</string>
     <key>CFBundleIdentifier</key>
     <string>com.zayd.greptilehud</string>
     <key>CFBundleVersion</key>
