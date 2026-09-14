@@ -9,9 +9,10 @@ tracks a devtime leaderboard for the crew, deployed on Render. See
 ## Landing page and hosting
 
 - `backend/site/` — the landing page (the funny one), embedded into the Go
-  binary and served at `/` alongside the API. Its download button always
-  points at the latest GitHub Release via
-  `releases/latest/download/GreptileHUD.zip`.
+  binary and served at `/` alongside the API. Its download buttons always
+  point at the latest GitHub Release via
+  `releases/latest/download/GreptileHUD.zip` and
+  `releases/latest/download/GreptileHUD.dmg`.
 - `goathud.com` is a CNAME to `greptile-hud.onrender.com`; add the domain in
   Render's Custom Domains settings and the TLS cert is issued automatically.
 - `render.yaml` — a Render Blueprint that deploys the whole stack in one
@@ -220,6 +221,19 @@ never uploaded. Without a Crew username, the entire feature remains local.
 open GreptileHUD.app
 ```
 
+`build.sh` produces two artifacts:
+
+- `GreptileHUD.app` — the app bundle (run with `open GreptileHUD.app`).
+- `GreptileHUD.dmg` — a real drag-to-Applications installer disk image for
+  first-time installs: double-click it, then drag **Greptile HUD** into
+  **Applications**.
+
+The bundle ships a Tokyo-night app icon (`Resources/GreptileHUD.icns`,
+generated from `Resources/icon.svg` via `scripts/make-icon.sh`), a classic
+`Contents/PkgInfo` marker, and is ad-hoc signed like every build. The built-in
+updater consumes each release's `GreptileHUD.zip` (the same bundle,
+compressed) so it can verify and hot-swap on every update.
+
 ## Vibecoders (the social layer)
 
 The **Crew tab** in the HUD overlay (and a section in the menu-bar menu) is the
@@ -256,19 +270,33 @@ Refresh, Change username, Forget username.
 
 Greptile HUD checks GitHub Releases shortly after launch and every six hours
 while it remains open. You can also use the menu-bar icon ▸ **Check for
-Updates…**. Choose **Install Update** and the app downloads the release from
-GitHub, verifies its SHA-256 checksum, bundle identity, version, and signature,
-replaces itself safely, and relaunches. There is no zip extraction or manual app
-swapping, and no update server is required.
+Updates…**. Because updates are published to GitHub Releases, checking,
+downloading, and installing needs no app server.
+
+When an update is available the prompt shows the version range you're moving
+between and the release's "What's new" notes. Choose **Install Update** and the
+app downloads the release from GitHub (retrying transient failures with a
+short backoff), verifies its SHA-256 checksum plus the bundle's identity,
+version, and code signature, replaces itself safely, and relaunches. After the
+swap it confirms the new build actually comes up — if it doesn't, it rolls
+back to the previous version and relaunches that instead, so a bad release
+can't leave you without a HUD. There is no zip extraction or manual app
+swapping.
+
+First-time installs don't rely on the updater: each release also publishes
+`GreptileHUD.dmg`, a drag-to-Applications installer disk image. Download it
+from the release (or the landing page), double-click, and drag **Greptile HUD**
+into **Applications**. Existing installs just keep auto-updating.
 
 Pull requests and non-main branches are compiled by `.github/workflows/ci.yml`.
 When an app change reaches `main`, `.github/workflows/release.yml` automatically:
 
 - chooses the next patch version after the latest GitHub Release;
-- builds and validates the universal Intel/Apple Silicon app;
-- preserves `GreptileHUD.zip` and its checksum as a 30-day workflow artifact;
-- creates the version tag and GitHub Release for the updater when release write
-  access is available.
+- builds and validates the universal Intel/Apple Silicon app and its DMG;
+- preserves `GreptileHUD.zip`, `GreptileHUD.dmg`, and their checksums as a
+  30-day workflow artifact;
+- creates the version tag and GitHub Release when release write access is
+  available.
 
 The workflow uses its repository token by default. If repository policy blocks
 release publishing, configure a write-capable `RELEASE_TOKEN` secret. A denied
@@ -297,6 +325,7 @@ That's the only setup. After that, just hold Right Shift anywhere.
   holding Shift (Esc or the ✕ closes it)
 - **Refresh now** — force a resync (it also auto-refreshes every 60s and on every peek)
 - **Check for Updates…** — check immediately; background checks also run every six hours
+- **About Greptile HUD…** — current version, a link to the repo, and signing status
 - **Quit**
 
 ## How it works

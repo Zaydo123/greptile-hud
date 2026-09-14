@@ -1,6 +1,10 @@
 # Build output
 GreptileHUD.app/
 *.app
+GreptileHUD.dmg
+GreptileHUD.zip
+GreptileHUD.zip.sha256
+GreptileHUD.dmg.sha256
 
 # Backend build output
 backend/server

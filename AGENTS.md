@@ -35,7 +35,10 @@ The app:
   trust-based: users self-choose a username; there is deliberately no
   authentication, OAuth, or GitHub activity tracking. See `backend/README.md`.
 - `Info.plist`: bundle metadata and source-of-truth version for local builds.
-- `build.sh`: universal macOS build and ad-hoc signing.
+- `build.sh`: universal macOS build, ad-hoc signing, and the drag-to-Applications
+  DMG installer.
+- `Resources/`: the committed app icon (`GreptileHUD.icns`) and its editable SVG
+  source (`icon.svg`). Regenerate the icon with `scripts/make-icon.sh`.
 - `scripts/next-version.sh`: deterministic automatic patch-version selection.
 - `.github/workflows/ci.yml`: pull-request and branch build validation.
 - `.github/workflows/release.yml`: automatic GitHub Release publishing from
@@ -90,7 +93,7 @@ The binary must contain both `arm64` and `x86_64`, and both slices must report a
 minimum macOS version of `13.0`.
 
 For updater or packaging changes, reproduce the release archive and validate the
-extracted app:
+extracted app and installer:
 
 ```bash
 rm -rf /tmp/greptile-hud-release-check /tmp/GreptileHUD.zip
@@ -99,6 +102,8 @@ ditto -c -k --sequesterRsrc --keepParent GreptileHUD.app /tmp/GreptileHUD.zip
 shasum -a 256 /tmp/GreptileHUD.zip
 ditto -x -k /tmp/GreptileHUD.zip /tmp/greptile-hud-release-check
 codesign --verify --deep --strict /tmp/greptile-hud-release-check/GreptileHUD.app
+hdiutil verify GreptileHUD.dmg
+test -f GreptileHUD.app/Contents/Resources/GreptileHUD.icns
 ```
 
 ## UI invariants
@@ -236,14 +241,16 @@ Merging is irreversible and outward-facing, so:
 ## GitHub updater invariants
 
 The updater is intentionally tied to GitHub repository
-`Zaydo123/greptile-hud` and expects every release to contain exactly:
+`Zaydo123/greptile-hud` and requires every release to contain:
 
 - `GreptileHUD.zip`
 - `GreptileHUD.zip.sha256`
 
-Do not rename these assets in only one location. Any naming change must be made
-together in `Sources/Updater.swift`, `.github/workflows/release.yml`, and the
-documentation.
+Each release additionally carries a `GreptileHUD.dmg` (the drag-to-Applications
+installer, with its own `GreptileHUD.dmg.sha256`) for first-time installs. The
+updater only consumes the zip and its checksum, so renaming any asset must be
+done together in `Sources/Updater.swift`, `.github/workflows/release.yml`, and
+the documentation.
 
 The updater must continue to:
 
@@ -253,7 +260,9 @@ The updater must continue to:
 - verify the bundle identifier, version, executable, and code signature;
 - stage the new app beside the installed app;
 - preserve or restore the old bundle if the swap fails;
-- relaunch only after the current process exits.
+- relaunch only after the current process exits;
+- confirm the relaunched build stays resident, and if it never comes up, restore
+  the previous bundle and relaunch that instead.
 
 Automatic checks should stay quiet when there is no update or a background check
 cannot reach GitHub. User-initiated checks should report their result.
@@ -269,8 +278,8 @@ the CI/release workflows change on `main`, `.github/workflows/release.yml`:
 1. reads the major/minor release line from `Info.plist`;
 2. chooses the next patch after the latest published release using
    `scripts/next-version.sh`;
-3. builds and validates the app;
-4. preserves the zip and checksum as a 30-day workflow artifact; and
+3. builds and validates the app and its DMG installer;
+4. preserves the zip, the DMG, and their checksums as a 30-day workflow artifact; and
 5. creates the tag at the exact triggering commit and publishes the assets when
    release write access is available.
 
@@ -298,7 +307,8 @@ reuse a published version tag.
 
 ## Signing note
 
-Local and current CI builds are ad-hoc signed. Keep signature validation in place,
+Local and current CI builds are ad-hoc signed, including the DMG installer's
+embedded app. Keep signature validation in place,
 but do not describe the build as Developer ID signed or notarized. Adding Apple
 Developer ID signing/notarization requires explicit certificate and secret setup
 and should be handled as a separate release-engineering change.

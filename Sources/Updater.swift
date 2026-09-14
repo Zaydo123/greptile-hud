@@ -13,11 +13,13 @@ final class UpdateController {
     private struct Release: Decodable {
         let tagName: String
         let htmlURL: URL
+        let body: String?
         let assets: [Asset]
 
         enum CodingKeys: String, CodingKey {
             case tagName = "tag_name"
             case htmlURL = "html_url"
+            case body
             case assets
         }
     }
@@ -50,7 +52,8 @@ final class UpdateController {
                 return
             }
 
-            let response = showUpdatePrompt(version: available)
+            let response = showUpdatePrompt(current: current, version: available,
+                                            notes: release.body)
             switch response {
             case .alertFirstButtonReturn:
                 do {
@@ -67,13 +70,19 @@ final class UpdateController {
             }
         } catch {
             if userInitiated {
-                showAlert(title: "Couldn’t check for updates", message: error.localizedDescription)
+                if case UpdateError.noReleases = error {
+                    // First install with no release published yet isn't an error.
+                    showAlert(title: "Greptile HUD is up to date",
+                              message: "No update has been published yet — you’re on the current build.")
+                } else {
+                    showAlert(title: "Couldn’t check for updates", message: error.localizedDescription)
+                }
             }
         }
     }
 
     private func latestRelease() async throws -> Release {
-        guard let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest") else {
+        guard let url = URL(string: "https://api.github.com/repos/\\(repository)/releases/latest") else {
             throw UpdateError.invalidRelease
         }
         var request = URLRequest(url: url)
@@ -81,6 +90,8 @@ final class UpdateController {
         request.setValue("GreptileHUD-Updater", forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 404 { throw UpdateError.noReleases }   // no published release yet → current
         try validateHTTP(response)
         return try JSONDecoder().decode(Release.self, from: data)
     }
@@ -91,8 +102,8 @@ final class UpdateController {
             throw UpdateError.missingAssets
         }
 
-        let archiveData = try await download(archive.downloadURL)
-        let checksumData = try await download(checksum.downloadURL)
+        let archiveData = try await downloadWithRetry(archive.downloadURL)
+        let checksumData = try await downloadWithRetry(checksum.downloadURL)
         guard let expected = String(data: checksumData, encoding: .utf8)?
             .split(whereSeparator: { $0.isWhitespace }).first.map(String.init),
               expected.caseInsensitiveCompare(sha256(archiveData)) == .orderedSame else {
@@ -118,12 +129,30 @@ final class UpdateController {
 
     private func download(_ url: URL) async throws -> Data {
         guard url.scheme == "https", url.host?.lowercased() == "github.com",
-              url.path.hasPrefix("/\(repository)/releases/download/") else {
+              url.path.hasPrefix("/\\(repository)/releases/download/") else {
             throw UpdateError.invalidRelease
         }
         let (data, response) = try await URLSession.shared.data(from: url)
         try validateHTTP(response)
         return data
+    }
+
+    /// Downloads are the download step most likely to hit a transient network
+    /// blip, so retry twice with a short backoff before surfacing a failure.
+    /// The SHA-256 check still runs on every successful fetch, so a partial
+    /// retry can't slip a corrupt archive through.
+    private func downloadWithRetry(_ url: URL) async throws -> Data {
+        for attempt in 1..<4 {
+            do {
+                return try await download(url)
+            } catch {
+                if attempt < 3 {
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000)
+                    continue
+                }
+            }
+        }
+        throw UpdateError.downloadFailed
     }
 
     private func validateHTTP(_ response: URLResponse) throws {
@@ -155,13 +184,32 @@ final class UpdateController {
         let backup = parent.appendingPathComponent(".GreptileHUD-backup-\(token).app", isDirectory: true)
         try fm.copyItem(at: newApp, to: staged)
 
-        // Wait until this process exits, atomically swap the bundles, restore on failure,
-        // and relaunch. Positional shell arguments keep file paths out of the script itself.
+        // Wait until this process exits, atomically swap the bundles, and relaunch.
+        // After swapping we check that the new app actually stays resident; if it
+        // never comes up we roll back to the previous build and relaunch that, so a
+        // bad release can't leave the user with no HUD at all. Positional shell
+        // arguments keep file paths out of the script itself.
         let script = #"""
         while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
         if mv "$2" "$4" && mv "$3" "$2"; then
-          rm -rf "$4" "$5"
           /usr/bin/open "$2"
+          launched=""
+          i=0
+          while [ -z "$launched" ] && [ "$i" -lt 50 ]; do
+            if pgrep -f "$2/Contents/MacOS/GreptileHUD" >/dev/null 2>&1; then
+              launched=1
+            else
+              i=$((i+1)); sleep 0.2
+            fi
+          done
+          if [ -n "$launched" ]; then
+            rm -rf "$4" "$5"
+          else
+            mv "$2" "$5/failed-new.app" 2>/dev/null
+            mv "$4" "$2"
+            /usr/bin/open "$2"
+            rm -rf "$5"
+          fi
         else
           test -e "$4" && mv "$4" "$2"
           rm -rf "$3" "$5"
@@ -198,15 +246,32 @@ final class UpdateController {
         String(value.drop(while: { $0 == "v" || $0 == "V" }))
     }
 
-    private func showUpdatePrompt(version: String) -> NSApplication.ModalResponse {
+    private func showUpdatePrompt(current: String, version: String, notes: String?) -> NSApplication.ModalResponse {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "Greptile HUD \(version) is available"
-        alert.informativeText = "The update will be downloaded from GitHub Releases, verified, installed, and the app will reopen."
+        alert.messageText = "Greptile HUD \\(version) is available"
+        var info = "You’re on \\(current). The update is downloaded from GitHub Releases, verified against its SHA-256 checksum and the bundle’s identity, version, and signature, then installed and the app reopens."
+        if let n = notes, !n.isEmpty {
+            let clean = whatIsNew(n)
+            if !clean.isEmpty {
+                info += "\n\nWhat’s new:\n\\(clean)"
+            }
+        }
+        alert.informativeText = info
         alert.addButton(withTitle: "Install Update")
         alert.addButton(withTitle: "Later")
         alert.addButton(withTitle: "View on GitHub")
         return alert.runModal()
+    }
+
+    /// Release notes are GitHub Markdown — collapse to non-empty lines and cap
+    /// the length so the prompt stays readable.
+    private func whatIsNew(_ body: String) -> String {
+        let clean = body.split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        return clean.count > 600 ? String(clean.prefix(600)) : clean
     }
 
     private func showAlert(title: String, message: String) {
@@ -226,6 +291,8 @@ private enum UpdateError: LocalizedError {
     case badResponse
     case invalidApplication
     case notRunningFromApp
+    case noReleases
+    case downloadFailed
     case commandFailed(String)
 
     var errorDescription: String? {
@@ -236,6 +303,8 @@ private enum UpdateError: LocalizedError {
         case .badResponse: return "GitHub returned an unexpected response."
         case .invalidApplication: return "The downloaded app failed identity, version, or code-signing validation."
         case .notRunningFromApp: return "Updates can only be installed when Greptile HUD is launched from GreptileHUD.app."
+        case .noReleases: return "No release has been published for this repository yet."
+        case .downloadFailed: return "Couldn’t download the update from GitHub after several attempts."
         case .commandFailed(let detail): return detail.isEmpty ? "The update helper failed." : detail
         }
     }

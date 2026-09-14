@@ -55,6 +55,8 @@ jobs:
         run: |
           ditto -c -k --sequesterRsrc --keepParent GreptileHUD.app GreptileHUD.zip
           shasum -a 256 GreptileHUD.zip > GreptileHUD.zip.sha256
+          shasum -a 256 GreptileHUD.dmg > GreptileHUD.dmg.sha256
+          ls -lh GreptileHUD.zip GreptileHUD.dmg
 
       - name: Preserve downloadable build
         uses: actions/upload-artifact@v4
@@ -63,6 +65,8 @@ jobs:
           path: |
             GreptileHUD.zip
             GreptileHUD.zip.sha256
+            GreptileHUD.dmg
+            GreptileHUD.dmg.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -72,7 +76,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           TAG: ${{ steps.version.outputs.tag }}
-        run: gh release create "$TAG" GreptileHUD.zip GreptileHUD.zip.sha256 --target "$GITHUB_SHA" --generate-notes --fail-on-no-commits
+        run: gh release create "$TAG" GreptileHUD.zip GreptileHUD.zip.sha256 GreptileHUD.dmg GreptileHUD.dmg.sha256 --target "$GITHUB_SHA" --generate-notes --fail-on-no-commits
 
       - name: Report release permission fallback
         if: steps.publish.outcome == 'failure'

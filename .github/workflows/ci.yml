@@ -18,8 +18,12 @@ jobs:
 
       - name: Validate scripts and metadata
         run: |
-          bash -n build.sh scripts/next-version.sh
+          bash -n build.sh scripts/next-version.sh scripts/make-icon.sh
           plutil -lint Info.plist
+          test -s Resources/GreptileHUD.icns
+          test "$(od -An -tx1 -N4 Resources/GreptileHUD.icns | tr -d ' \n')" = "69636e73"
+          test -s Resources/icon.svg
+          grep -q '<svg' Resources/icon.svg
           grep -q "actions/upload-artifact@v4" .github/workflows/release.yml
           grep -q "continue-on-error: true" .github/workflows/release.yml
           grep -q "secrets.RELEASE_TOKEN" .github/workflows/release.yml
@@ -36,6 +40,10 @@ jobs:
           codesign --verify --deep --strict GreptileHUD.app
           lipo GreptileHUD.app/Contents/MacOS/GreptileHUD -verify_arch x86_64 arm64
           test "$(vtool -show-build GreptileHUD.app/Contents/MacOS/GreptileHUD | grep -c 'minos 13.0')" -eq 2
+          test -f GreptileHUD.app/Contents/Resources/GreptileHUD.icns
+          test -f GreptileHUD.app/Contents/PkgInfo
+          grep -q 'usr/local/' GreptileHUD.app/Contents/PkgInfo
+          test -s GreptileHUD.dmg
           git diff --check
 
   backend:
@@ -70,6 +78,7 @@ jobs:
           test -f backend/site/index.html
           grep -q "releases/latest/download/GreptileHUD.zip" backend/site/index.html
           grep -q "releases/latest/download/GreptileHUD.zip.sha256" backend/site/index.html
+          grep -q "releases/latest/download/GreptileHUD.dmg" backend/site/index.html
           grep -q "api.github.com/repos/Zaydo123/greptile-hud/releases/latest" backend/site/index.html
           grep -q "go:embed site/index.html" backend/main.go
           ruby -e "require 'yaml'; YAML.load_file('render.yaml'); puts 'render.yaml parses'"

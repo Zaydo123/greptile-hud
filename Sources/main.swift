@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Foundation
 
 /// The HUD stays nonactivating for normal peeks, but must be allowed to become
 /// key when an interactive control explicitly requests keyboard focus.
@@ -116,11 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hint = NSMenuItem(title: "Tip: hold Right Shift to peek", action: nil, keyEquivalent: "")
         hint.isEnabled = false
+        let about = NSMenuItem(title: "About Greptile HUD…", action: #selector(showAbout), keyEquivalent: "")
         let access = NSMenuItem(title: "Grant Accessibility Access…", action: #selector(openAccessibility), keyEquivalent: "")
         let quit = NSMenuItem(title: "Quit Greptile HUD", action: #selector(quitApp), keyEquivalent: "q")
-        [access, quit].forEach { $0.target = self }
+        [about, access, quit].forEach { $0.target = self }
         menu.addItem(hint)
         menu.addItem(.separator())
+        menu.addItem(about)
         menu.addItem(access)
         menu.addItem(quit)
     }
@@ -476,6 +479,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func checkForUpdates() {
         Task { await updater.checkForUpdates(userInitiated: true) }
+    }
+
+    @objc private func showAbout() {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let a = NSAlert()
+        a.messageText = "Greptile HUD"
+        a.informativeText = "Greptile HUD \\(version)\n\nA menu-bar overlay for your pull requests, review trains, and devtime crew.\n\nzaydo123/greptile-hud · ad-hoc signed"
+        a.addButton(withTitle: "Visit GitHub")
+        a.addButton(withTitle: "OK")
+        if a.runModal() == .alertFirstButtonReturn {
+            if let url = URL(string: "https://github.com/Zaydo123/greptile-hud") {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 
     @objc private func openAccessibility() {
