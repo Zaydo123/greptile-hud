@@ -64,6 +64,9 @@ jobs:
           go vet ./...
           go build ./...
 
+      - name: Run unit tests
+        run: go test ./...
+
       - name: Build Docker image
         working-directory: .
         run: docker build -t greptilehud-backend-check -f Dockerfile .
