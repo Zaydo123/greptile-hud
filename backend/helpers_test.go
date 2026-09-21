@@ -35,6 +35,36 @@ func TestEnvOr(t *testing.T) {
 	}
 }
 
+func TestLoadConfig(t *testing.T) {
+	// loadConfig() reads PORT and DATABASE_URL from the environment and wires
+	// the 8080 port default. Each subtest sets both vars itself so it is
+	// self-contained regardless of execution order.
+	t.Run("reads PORT and DATABASE_URL from env", func(t *testing.T) {
+		t.Setenv("PORT", "9123")
+		t.Setenv("DATABASE_URL", "postgres://env")
+		cfg := loadConfig()
+		if cfg.port != "9123" || cfg.databaseURL != "postgres://env" {
+			t.Fatalf("loadConfig() = (%q, %q), want (9123, postgres://env)", cfg.port, cfg.databaseURL)
+		}
+	})
+	t.Run("PORT falls back to 8080 when unset", func(t *testing.T) {
+		t.Setenv("PORT", "")
+		t.Setenv("DATABASE_URL", "postgres://x")
+		cfg := loadConfig()
+		if cfg.port != "8080" {
+			t.Fatalf("port = %q, want 8080", cfg.port)
+		}
+	})
+	t.Run("empty DATABASE_URL fails validation", func(t *testing.T) {
+		t.Setenv("PORT", "8080")
+		t.Setenv("DATABASE_URL", "")
+		cfg := loadConfig()
+		if err := cfg.validate(); err == nil {
+			t.Fatal("loadConfig() with empty DATABASE_URL passed validate(), want error")
+		}
+	})
+}
+
 func TestConfigValidate(t *testing.T) {
 	t.Run("missing DATABASE_URL is an error", func(t *testing.T) {
 		c := config{databaseURL: ""}
