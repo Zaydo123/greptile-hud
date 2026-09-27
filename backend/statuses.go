@@ -13,6 +13,10 @@ import (
 const (
 	statusMessageLimit = 80
 	statusEmojiByteMax = 32
+	// statusStartFutureWindow is the furthest ahead a client may backdate a
+	// status start. A started_at farther in the future than this is treated as
+	// a clock-skewed or bogus value and falls back to "now".
+	statusStartFutureWindow = 5 * time.Minute
 )
 
 type crewStatus struct {
@@ -49,6 +53,19 @@ func normalizeStatus(emoji, message string) (string, string, error) {
 	return emoji, message, nil
 }
 
+// resolveStatusStart picks the published status start time. A client sends the
+// wall-clock time its stopwatch began; the server honours it unless it is nil
+// (start "now") or suspiciously far in the future, in which case it clamps to
+// "now" so a clock-skewed or manually forged timestamp can't push the status
+// into the future. Past start times are always kept (they are legitimate
+// backdated resumes).
+func resolveStatusStart(startedAt *time.Time, now time.Time) time.Time {
+	if startedAt == nil || startedAt.After(now.Add(statusStartFutureWindow)) {
+		return now
+	}
+	return startedAt.UTC()
+}
+
 // handleSetStatus publishes the user's currently running local stopwatch.
 // Identity follows the rest of Vibecoders: a self-chosen, unauthenticated name.
 func (s *server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
@@ -75,10 +92,7 @@ func (s *server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
-	startedAt := now
-	if body.StartedAt != nil && !body.StartedAt.After(now.Add(5*time.Minute)) {
-		startedAt = body.StartedAt.UTC()
-	}
+	startedAt := resolveStatusStart(body.StartedAt, now)
 	if _, err := s.db.ExecContext(r.Context(), `
 		UPDATE users
 		SET status_emoji = $2, status_message = $3, status_started_at = $4, updated_at = now()
