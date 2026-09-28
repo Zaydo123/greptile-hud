@@ -102,10 +102,7 @@ func (s *server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := u.Name
-	if name == "" {
-		name = u.Login
-	}
+	name := displayName(u.Login, u.Name)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
 		"status": crewStatus{
@@ -167,10 +164,7 @@ func (s *server) handleStatuses(w http.ResponseWriter, r *http.Request) {
 			logf("statuses scan: %v", err)
 			continue
 		}
-		status.Name = name.String
-		if status.Name == "" {
-			status.Name = status.Login
-		}
+		status.Name = displayName(status.Login, name.String)
 		status.Emoji = emoji.String
 		status.Message = message.String
 		status.Online = lastSeen.Valid && time.Since(lastSeen.Time) < onlineWindow
