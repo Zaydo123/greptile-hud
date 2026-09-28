@@ -28,6 +28,16 @@ func isOnline(u *User) bool {
 	return u.LastSeen != nil && time.Since(*u.LastSeen) < onlineWindow
 }
 
+// displayName is the user-facing name shown in the UI. A user may have left
+// their display name unset (NULL name column); we fall back to their login so
+// the HUD never shows a blank label.
+func displayName(login, name string) string {
+	if name == "" {
+		return login
+	}
+	return name
+}
+
 type leaderboardEntry struct {
 	Rank     int        `json:"rank"`
 	Login    string     `json:"login"`
@@ -79,11 +89,7 @@ func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 			logf("leaderboard scan: %v", err)
 			continue
 		}
-		if name.Valid && name.String != "" {
-			e.Name = name.String
-		} else {
-			e.Name = e.Login
-		}
+		e.Name = displayName(e.Login, name.String)
 		e.Rank = rank + 1
 		e.Online = isOnline(&User{LastSeen: e.LastSeen})
 		out = append(out, e)
@@ -129,11 +135,7 @@ func (s *server) handleOnline(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&e.Login, &name, &e.LastSeen, &e.DevtimeToday); err != nil {
 			continue
 		}
-		if name.Valid && name.String != "" {
-			e.Name = name.String
-		} else {
-			e.Name = e.Login
-		}
+		e.Name = displayName(e.Login, name.String)
 		out = append(out, e)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"online": out})
