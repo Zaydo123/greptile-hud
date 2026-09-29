@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -33,5 +34,19 @@ func TestNormalizeStatus(t *testing.T) {
 					emoji, message, tt.wantEmoji, tt.wantMessage)
 			}
 		})
+	}
+}
+
+func TestNormalizeStatusRejectsInvalidUtf8Emoji(t *testing.T) {
+	// The byte ceiling and the UTF-8 validity check are independent guards:
+	// a short but malformed byte sequence (a lone lead byte with no
+	// continuation) must be rejected here, not only when it overflows the
+	// statusEmojiByteMax limit already covered above.
+	var b bytes.Buffer
+	b.Write([]byte{0xC3})
+	bad := b.String()
+
+	if _, _, err := normalizeStatus(bad, "hi"); err == nil {
+		t.Fatalf("normalizeStatus() accepted malformed emoji %q, want error", bad)
 	}
 }
