@@ -115,15 +115,19 @@ func pulse(ctx context.Context, db *sql.DB, userID int64, day string, now time.T
 			return err
 		}
 	} else {
-		dt := now.Sub(lastBeat.Time)
-		switch {
-		case dt >= 30*time.Second && dt <= 10*time.Minute:
+		// Note the accrual window (sprintMinBeat = 30s minimum, sprintIdleGap =
+		// 10m) is deliberately the same one classifySprintBeat governs, so
+		// devtime and the sprint stopwatch agree on the same beats. Keeping the
+		// decision in that one tested function means a future edit can't drift
+		// the two apart (see heartbeat_test.go).
+		switch action, accrued := classifySprintBeat(lastBeat.Time, now); action {
+		case sprintExtend:
 			if _, err := tx.ExecContext(ctx,
 				"UPDATE devtime SET seconds = seconds + $2, last_heartbeat_at = $3 WHERE user_id = $1 AND day = $4::date",
-				userID, int64(dt.Seconds()), now, day); err != nil {
+				userID, accrued, now, day); err != nil {
 				return err
 			}
-		case dt > 10*time.Minute:
+		case sprintRestart:
 			if _, err := tx.ExecContext(ctx,
 				"UPDATE devtime SET last_heartbeat_at = $3 WHERE user_id = $1 AND day = $2::date", userID, day, now); err != nil {
 				return err

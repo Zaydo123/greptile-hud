@@ -1,17 +1,17 @@
 package main
 
-// The devtime accrual window lives in two places that must stay in lockstep:
+// The devtime accrual window must stay in lockstep with the sprint stopwatch:
 //
-//   - pulse() (db.go) hardcodes the same thresholds as bare literal durations
-//     in its SQL branches: beats <30s apart accrue nothing, [30s, 10m] accrue
-//     the gap, and >10m apart only refresh the heartbeat without accruing.
-//   - classifySprintBeat (sprints.go) encodes the identical rule through the
-//     sprintMinBeat / sprintIdleGap constants.
+//   - pulse() (db.go) decides whether to accrue a beat through classifySprintBeat,
+//     governed by the sprintMinBeat / sprintIdleGap constants.
+//   - classifySprintBeat (sprints.go) encodes the rule: beats <30s apart accrue
+//     nothing, [30s, 10m] accrue the gap, and >10m apart only refresh the
+//     heartbeat without accruing.
 //
-// A drift between the two means focus time and the sprint stopwatch would
-// disagree on the same stream of heartbeats. These tests pin pulse's literals
-// to the constants so the coupling is explicit and a future edit to one side
-// is forced to touch the other.
+// A drift here would mean focus time and the sprint stopwatch disagree on the
+// same stream of heartbeats. These tests pin pulse's decision to the constants
+// so the coupling is explicit and a future edit to one side is forced to touch
+// the other.
 
 import (
 	"testing"
