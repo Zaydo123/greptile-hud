@@ -75,10 +75,6 @@ func recordSprint(ctx context.Context, tx *sql.Tx, userID int64, now time.Time) 
 			}
 		}
 	}
-	if err != nil {
-		return err
-	}
-
 	return err
 }
 
