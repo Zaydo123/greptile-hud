@@ -66,6 +66,15 @@ func resolveStatusStart(startedAt *time.Time, now time.Time) time.Time {
 	return startedAt.UTC()
 }
 
+// statusOnline reports whether a status owner is currently online, given their
+// last-seen value. A NULL last_seen (never beaten) or one older than the online
+// window reads as offline. This is the same presence rule isOnline() applies to
+// a fully-loaded user, factored out here because handleStatuses scans the
+// status columns without building a *User.
+func statusOnline(lastSeen sql.NullTime, now time.Time) bool {
+	return lastSeen.Valid && now.Sub(lastSeen.Time) < onlineWindow
+}
+
 // handleSetStatus publishes the user's currently running local stopwatch.
 // Identity follows the rest of Vibecoders: a self-chosen, unauthenticated name.
 func (s *server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
@@ -167,7 +176,7 @@ func (s *server) handleStatuses(w http.ResponseWriter, r *http.Request) {
 		status.Name = displayName(status.Login, name.String)
 		status.Emoji = emoji.String
 		status.Message = message.String
-		status.Online = lastSeen.Valid && time.Since(lastSeen.Time) < onlineWindow
+		status.Online = statusOnline(lastSeen, time.Now())
 		out = append(out, status)
 	}
 	if err := rows.Err(); err != nil {
