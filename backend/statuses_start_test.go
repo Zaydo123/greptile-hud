@@ -61,3 +61,15 @@ func TestResolveStatusStart(t *testing.T) {
 		}
 	})
 }
+
+func TestStatusStartFutureWindowValue(t *testing.T) {
+	// resolveStatusStart's backdate clamp is deliberately capped: a client may
+	// push a status start at most this far ahead of the server clock before it
+	// is treated as clock-skewed or forged and clamped to "now". Pin the value
+	// so an edit that widens or changes the units (e.g. to 10*time.Minute or a
+	// bare 300) is forced to acknowledge the intended five-minute cap — the
+	// same lockstep guard windows_test.go applies to the other time windows.
+	if statusStartFutureWindow != 5*time.Minute {
+		t.Fatalf("statusStartFutureWindow = %s, want 5m", statusStartFutureWindow)
+	}
+}
