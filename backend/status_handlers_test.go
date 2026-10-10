@@ -29,6 +29,7 @@ func TestHandleSetStatusValidation(t *testing.T) {
 		{name: "invalid user rejected", body: `{"user":"not valid!","emoji":"🏋️"}`, wantError: "missing or invalid user"},
 		{name: "empty emoji and message rejected", body: `{"user":"zayd","emoji":" ","message":" "}`, wantError: "emoji or message is required"},
 		{name: "message too long rejected", body: `{"user":"zayd","emoji":"🙂","message":"` + strings.Repeat("a", statusMessageLimit+1) + `"}`, wantError: "message is too long"},
+		{name: "emoji too long rejected", body: `{"user":"zayd","emoji":"` + strings.Repeat("x", statusEmojiByteMax+1) + `","message":"hi"}`, wantError: "emoji is too long"},
 	}
 
 	for _, tt := range tests {
