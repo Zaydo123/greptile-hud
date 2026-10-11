@@ -1,13 +1,5 @@
 package main
 
-// Boundary coverage for normalizeStatus (statuses.go). The two limits are
-// deliberately different units: the emoji field is capped by BYTES (a ZWJ
-// emoji grapheme cluster can span several runes, so a rune count would wrongly
-// reject a single visual character), while the message field is capped by
-// RUNES (so a message of non-ASCII multi-byte characters isn't unfairly short).
-// These tests pin the exact edges of both so a future edit can't drift the
-// units apart. Tested with the stdlib only — no new dependency.
-
 import (
 	"strings"
 	"testing"
@@ -19,6 +11,11 @@ func TestNormalizeStatusMessageLimitIsRunesNotBytes(t *testing.T) {
 	// guard counts characters, not storage size.
 	if statusMessageLimit < 1 {
 		t.Fatalf("statusMessageLimit = %d, want >= 1", statusMessageLimit)
+	}
+	// Pin the limit itself to its documented literal so an accidental edit to
+	// the constant can't silently drift the client-visible message cap.
+	if statusMessageLimit != 80 {
+		t.Fatalf("statusMessageLimit = %d, want 80", statusMessageLimit)
 	}
 	atLimit := strings.Repeat("é", statusMessageLimit)
 	if _, _, err := normalizeStatus("🙂", atLimit); err != nil {
@@ -54,6 +51,11 @@ func TestNormalizeStatusEmojiByteCeiling(t *testing.T) {
 	// the test isolates the byte limit from the rune semantics.
 	if statusEmojiByteMax < 1 {
 		t.Fatalf("statusEmojiByteMax = %d, want >= 1", statusEmojiByteMax)
+	}
+	// Pin the ceiling to its documented literal, matching how the sibling
+	// limit tests pin onlineWindow / sprintRetention / statusStartFutureWindow.
+	if statusEmojiByteMax != 32 {
+		t.Fatalf("statusEmojiByteMax = %d, want 32", statusEmojiByteMax)
 	}
 	atCeiling := strings.Repeat("x", statusEmojiByteMax)
 	if _, _, err := normalizeStatus(atCeiling, "msg"); err != nil {
