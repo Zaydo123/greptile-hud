@@ -39,12 +39,15 @@ idle_seconds() {
 
 while true; do
   running=""
-  for app in $(printf '%s' "$APPS" | tr ',' '\n'); do
+  # Read app names line-by-line instead of relying on word-splitting:
+  # `for app in $(...)` would split names containing spaces (e.g. the default
+  # "Code - Insiders") into separate tokens and pgrep the fragments.
+  while IFS= read -r app; do
     if pgrep -x "$app" >/dev/null 2>&1; then
       running="$app"
       break
     fi
-  done
+  done <<<"$(printf '%s\n' "$APPS" | tr ',' '\n')"
 
   if [ -n "$running" ]; then
     idle="$(idle_seconds || true)"
