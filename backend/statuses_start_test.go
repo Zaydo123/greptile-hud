@@ -51,13 +51,18 @@ func TestResolveStatusStart(t *testing.T) {
 	})
 
 	t.Run("non-UTC start is normalized to UTC", func(t *testing.T) {
-		if now.Location() == time.Local {
-			t.Skip("local zone equals UTC; cannot exercise the conversion")
-		}
+		// start is explicitly placed in a fixed UTC-5 zone, so this conversion
+		// is independent of the runner's local zone. Guarding on
+		// time.Local == time.UTC (the default on CI runners) would skip the
+		// very path this subtest exists to pin; the zone here is fixed, so the
+		// conversion is always exercisable.
 		start := now.In(time.FixedZone("UTC-5", -5*60*60))
 		got := resolveStatusStart(&start, now)
+		if !got.Equal(start) {
+			t.Fatalf("resolveStatusStart() = %v, want same instant as %v", got, start)
+		}
 		if _, offset := got.Zone(); offset != 0 {
-			t.Fatalf("resolveStatusStart() = %v, want a UTC-normalized time", got)
+			t.Fatalf("resolveStatusStart() = %v (%d offset), want a UTC-normalized time", got, offset)
 		}
 	})
 }
