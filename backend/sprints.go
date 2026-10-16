@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"strconv"
 	"time"
 )
 
@@ -11,6 +12,7 @@ const (
 	sprintMinBeat               = 30 * time.Second
 	sprintRetention             = 90 * 24 * time.Hour
 	sprintMinimumDisplaySeconds = int64(60)
+	sprintListLimit             = 250
 )
 
 type sprintAction int
@@ -99,7 +101,7 @@ func listSprints(ctx context.Context, db *sql.DB, userID int64, periodName strin
 		query += ` AND started_at < $3 AND last_active_at >= $4`
 		args = append(args, period.End, period.Start)
 	}
-	query += ` ORDER BY started_at DESC LIMIT 250`
+	query += " ORDER BY started_at DESC LIMIT " + strconv.Itoa(sprintListLimit)
 
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {

@@ -35,3 +35,13 @@ func TestSprintMinimumDisplayDuration(t *testing.T) {
 		t.Fatalf("sprintMinimumDisplaySeconds = %d, want 60", sprintMinimumDisplaySeconds)
 	}
 }
+
+func TestSprintListLimitIntendsMaximum(t *testing.T) {
+	// listSprints caps its result at `LIMIT 250` (built from sprintListLimit),
+	// and the README documents "at most the latest 250 sprints". Pin the
+	// constant to that literal so a future edit can't silently widen the
+	// response and drift the documented contract.
+	if sprintListLimit != 250 {
+		t.Fatalf("sprintListLimit = %d, want 250 (listSprints SQL 'ORDER BY ... LIMIT 250')", sprintListLimit)
+	}
+}
