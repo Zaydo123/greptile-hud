@@ -57,9 +57,21 @@ func main() {
 
 	s := &server{db: db}
 
+	handler := logRequests(newMux(s))
+	addr := ":" + cfg.port
+	logf("vibecoders server listening on %s", addr)
+	if err := http.ListenAndServe(addr, handler); err != nil {
+		logger.Fatalf("server: %v", err)
+	}
+}
+
+// newMux wires every route onto a fresh ServeMux. It is extracted from main so
+// the routing surface (landing page, /api/health, 404 and method handling) is
+// unit-testable without a live Postgres.
+func newMux(s *server) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		if err := db.PingContext(r.Context()); err != nil {
+		if err := s.db.PingContext(r.Context()); err != nil {
 			httpError(w, http.StatusServiceUnavailable, "db unavailable")
 			return
 		}
@@ -87,12 +99,7 @@ func main() {
 		w.Write(landingHTML)
 	})
 
-	handler := logRequests(mux)
-	addr := ":" + cfg.port
-	logf("vibecoders server listening on %s", addr)
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		logger.Fatalf("server: %v", err)
-	}
+	return mux
 }
 
 func logRequests(next http.Handler) http.Handler {
