@@ -150,12 +150,14 @@ enum GH {
 
     /// Recent Actions runs in `repo`. Pass `actor` to see only that person's runs,
     /// or nil for everyone's — the whole queue, including whoever is ahead of you.
-    static func fetchRuns(repo: String, actor: String?) async -> [WorkflowRun] {
+    /// `nil` means the request failed (as opposed to "no runs"), so the caller
+    /// can keep what it already shows instead of blanking the column.
+    static func fetchRuns(repo: String, actor: String?) async -> [WorkflowRun]? {
         var query = "per_page=\(actor == nil ? 30 : 20)"
         if let actor { query = "actor=\(actor)&" + query }
         guard let data = try? await run([
             "api", "repos/\(repo)/actions/runs?\(query)", "--jq", runsJQ
-        ]), let text = String(data: data, encoding: .utf8) else { return [] }
+        ]), let text = String(data: data, encoding: .utf8) else { return nil }
         let dec = JSONDecoder()
         var out: [WorkflowRun] = []
         for raw in text.split(separator: "\n") {
@@ -686,7 +688,11 @@ final class PRStore: ObservableObject {
         didSet {
             guard oldValue != showAllActors else { return }
             UserDefaults.standard.set(showAllActors, forKey: PRStore.allActorsKey)
-            Task { await refreshRuns(for: prs) }
+            Task {
+                runsRefreshing = true
+                await refreshRuns(for: prs)
+                runsRefreshing = false
+            }
         }
     }
     private static let allActorsKey = "hud.actions.showAllActors"
@@ -733,6 +739,11 @@ final class PRStore: ObservableObject {
 
     private var inFlight = false
     private var runsInFlight = false
+    /// Bumped per Actions fetch so a slow, older fetch can't overwrite a newer one
+    /// (e.g. a background poll landing after a Mine/Everyone switch).
+    private var runsGeneration = 0
+    /// Which actor mode `runs` was fetched under.
+    private var runsShowAllActors: Bool?
 
     func refresh(force: Bool = false) async {
         if inFlight { return }
@@ -790,14 +801,26 @@ final class PRStore: ObservableObject {
             repos = await GH.recentlyPushedRepos(login: login)
         }
         repos = Array(repos.prefix(8))
-        guard !repos.isEmpty else { runs = []; return }
+        runsGeneration += 1
+        let generation = runsGeneration
+        let allActors = showAllActors
+        guard !repos.isEmpty else { publishRuns([], generation: generation, allActors: allActors); return }
 
-        let actorFilter = showAllActors ? nil : login
+        let actorFilter = allActors ? nil : login
         var all: [WorkflowRun] = []
-        await withTaskGroup(of: [WorkflowRun].self) { group in
-            for repo in repos { group.addTask { await GH.fetchRuns(repo: repo, actor: actorFilter) } }
-            for await rs in group { all.append(contentsOf: rs) }
+        var failed: Set<String> = []
+        await withTaskGroup(of: (String, [WorkflowRun]?).self) { group in
+            for repo in repos { group.addTask { (repo, await GH.fetchRuns(repo: repo, actor: actorFilter)) } }
+            for await (repo, rs) in group {
+                if let rs { all.append(contentsOf: rs) } else { failed.insert(repo) }
+            }
         }
+        guard generation == runsGeneration else { return }
+        // A repo whose fetch blipped keeps its previous runs rather than vanishing
+        // for one poll and popping back on the next.
+        let sameMode = runsShowAllActors == allActors
+        if failed.count == repos.count && sameMode { return }
+        if sameMode { all.append(contentsOf: runs.filter { failed.contains($0.repo) }) }
 
         // Keep human-triggered runs — merges/pushes/PRs/manual — not cron or bot dispatches.
         let userEvents: Set<String> = ["push", "merge_group", "pull_request",
@@ -814,12 +837,26 @@ final class PRStore: ObservableObject {
             .sorted { a, b in
                 if a.isRunning != b.isRunning { return a.isRunning && !b.isRunning }
                 if a.isMine != b.isMine { return a.isMine && !b.isMine }
-                return (a.startedAt ?? .distantPast) > (b.startedAt ?? .distantPast)
+                let sa = a.startedAt ?? .distantPast, sb = b.startedAt ?? .distantPast
+                if sa != sb { return sa > sb }
+                return a.id > b.id
             }
+
+        // Carry the step detail we already know into the fresh list, so rows don't
+        // lose their step line (and shrink) until the step lookups come back.
+        let known = Dictionary(runs.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for i in kept.indices {
+            guard let old = known[kept[i].id], old.currentStep != nil,
+                  kept[i].isRunning || kept[i].conclusion == "failure" else { continue }
+            kept[i].currentJob = old.currentJob
+            kept[i].currentStep = old.currentStep
+            kept[i].stepIndex = old.stepIndex
+            kept[i].stepTotal = old.stepTotal
+        }
 
         // Show the list immediately, then fill in "what step is it on" for the runs
         // where that's meaningful — in flight, or failed and worth explaining.
-        runs = kept
+        publishRuns(kept, generation: generation, allActors: allActors)
         let detailIdx = kept.indices
             .filter { kept[$0].isRunning || kept[$0].conclusion == "failure" }
             .prefix(10)
@@ -833,7 +870,15 @@ final class PRStore: ObservableObject {
             }
             for await (i, r) in group { kept[i] = r }
         }
-        runs = kept
+        publishRuns(kept, generation: generation, allActors: allActors)
+    }
+
+    /// Only touch `runs` when this is still the newest fetch and something
+    /// actually changed — an identical poll result shouldn't re-render the column.
+    private func publishRuns(_ next: [WorkflowRun], generation: Int, allActors: Bool) {
+        guard generation == runsGeneration else { return }
+        runsShowAllActors = allActors
+        if runs != next { runs = next }
     }
 
     /// Poll used while the overlay is on screen. Actions runs (and the step each
@@ -853,8 +898,7 @@ final class PRStore: ObservableObject {
     func refreshRunsNow() async {
         if inFlight || runsInFlight { return }
         runsInFlight = true
-        runsRefreshing = true
-        defer { runsInFlight = false; runsRefreshing = false }
+        defer { runsInFlight = false }
         await refreshRuns(for: prs)
     }
 
@@ -1001,6 +1045,12 @@ final class PRStore: ObservableObject {
 
     /// Stacks the HUD can see right now, rebuilt from the open PRs: a PR whose
     /// base branch is another open PR's head branch is stacked on it.
+    /// The open PR whose branch `pr` targets, if any — i.e. the PR it's stacked on.
+    func parentPR(of pr: PR) -> PR? {
+        guard let base = pr.baseRef else { return nil }
+        return prs.first { $0.repo == pr.repo && $0.headRef == base && $0.id != pr.id }
+    }
+
     var detectedStacks: [PRStack] {
         var byHead: [String: PR] = [:]
         for pr in prs { if let h = pr.headRef { byHead["\(pr.repo)|\(h)"] = pr } }

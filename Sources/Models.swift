@@ -100,7 +100,11 @@ struct WorkflowRun: Identifiable, Equatable {
 struct RunStack: Identifiable {
     let lead: WorkflowRun     // oldest run in the stack
     let count: Int
-    var id: Int { lead.id }
+    /// The bucket (repo + workflow + state), not the lead run: when the lead
+    /// finishes and the next run takes its place, the row stays put instead of
+    /// animating out and back in.
+    let key: String
+    var id: String { key }
 
     /// Collapse repeat runs of the same workflow in the same state into one row.
     /// Each row shows the **oldest** of its bunch — the one furthest along, at
@@ -115,20 +119,25 @@ struct RunStack: Identifiable {
             let state = r.isRunning ? "running" : (r.conclusion ?? "done")
             buckets["\(r.repo)|\(r.name)|\(state)", default: []].append(r)
         }
-        return buckets.values.compactMap { group -> RunStack? in
+        // Every comparison ends on a unique key: dictionary order is random, so
+        // an unbroken tie would shuffle rows between identical polls.
+        return buckets.compactMap { key, group -> RunStack? in
             guard let lead = group.min(by: {
-                ($0.startedAt ?? .distantFuture) < ($1.startedAt ?? .distantFuture)
+                let a = $0.startedAt ?? .distantFuture, b = $1.startedAt ?? .distantFuture
+                return a != b ? a < b : $0.id < $1.id
             }) else { return nil }
-            return RunStack(lead: lead, count: group.count)
+            return RunStack(lead: lead, count: group.count, key: key)
         }
         .sorted { a, b in
             let x = a.lead, y = b.lead
             if rank(x) != rank(y) { return rank(x) < rank(y) }
             if x.isMine != y.isMine { return x.isMine }
-            if x.isRunning {
-                return (x.startedAt ?? .distantFuture) < (y.startedAt ?? .distantFuture)
+            let sx = x.startedAt, sy = y.startedAt
+            if sx != sy {
+                if x.isRunning { return (sx ?? .distantFuture) < (sy ?? .distantFuture) }
+                return (sx ?? .distantPast) > (sy ?? .distantPast)
             }
-            return (x.startedAt ?? .distantPast) > (y.startedAt ?? .distantPast)
+            return a.key < b.key
         }
     }
 
