@@ -41,8 +41,8 @@ but it grows freely, and height shrinks too.
 
 Slow fetches show their work: first load draws shimmering placeholder cards in
 the shape of the real rows, the Actions column runs a sweep line under its header
-while re-fetching, and anything you click that needs data (refresh, merge, build
-train, the Mine/Everyone switch) shows a spinner in place.
+while re-fetching, and anything you click that needs data (refresh, merge, the
+Mine/Everyone switch) shows a spinner in place.
 
 No tokens to paste — it uses your existing `gh` CLI auth.
 
@@ -65,76 +65,6 @@ PRs that are actively re-reviewing sort to the top.
 > Greptile comments on the PR. The HUD reads the score/review-count from whichever
 > Greptile comment was **edited (`updated_at`) most recently** — Greptile revises its
 > review in place — so you always see the current one, not whichever was posted last.
-
-## Merge trains (the Train tab)
-
-Merging five PRs one at a time means five CI runs and five deploys stepping on
-each other. The **Train** tab lands several PRs together instead, in one of two
-modes.
-
-### Stack — GitHub's stacked pull requests
-
-Points each selected PR at the branch of the one below it, so they form a
-[stacked pull request](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests)
-chain ending at the trunk. Every PR keeps its own diff, review and history, and
-GitHub draws the stack map in each PR's merge box.
-
-- **Order** is confidence-first: the highest Greptile score sits at the bottom,
-  so if you land only part of the stack, the safest part lands first.
-- **Nothing is merged and no branch is rewritten** — stacking only changes which
-  branch each PR targets. **Flatten** points them all back at the trunk, so it's
-  fully reversible.
-- The HUD shows any stack it detects (including ones you made elsewhere) with its
-  layers top-down, each layer's merge blockers, a link to the top PR, and Flatten.
-- File overlap is a *warning* here rather than a blocker: nothing merges at
-  stack time, and GitHub reports each layer's mergeability afterwards.
-
-Two caveats worth knowing. Stacked PRs are **public preview** and same-repo only
-(no cross-fork). And the HUD has no local clone, so it builds a *logical* chain —
-it re-points bases but cannot rebase the branches onto each other. GitHub's
-one-shot stack merge wants linear history between layers, so a HUD-built stack
-may not qualify for it; for a genuinely rebased stack use the official
-[`gh stack`](https://github.com/github/gh-stack) CLI extension, which does the
-local rebases. If you want a guaranteed single pipeline, use Combine.
-
-### Combine — one branch, one PR
-
-Merges the selected PRs onto **one throwaway branch and one pull request**, so
-the pipeline runs exactly once regardless of what GitHub supports.
-
-- **Candidates** are grouped by *repo + base branch* — a train is one branch on
-  one pipeline, so PRs targeting different bases can never combine. Groups with
-  fewer than two mergeable PRs don't appear.
-- **Compatibility** is decided by the files each PR touches: two PRs that change
-  the same file are flagged (`shares 2 files with #41`) and the **Build train**
-  button stays disabled until you drop one of them.
-- **Smart select** takes the largest group and walks it confidence-first (5/5
-  before 3/5), adding every PR that doesn't touch an already-claimed file. PRs
-  with a review still running are skipped — their score isn't settled yet.
-- **Build train** (Combine mode) then, entirely through the GitHub API:
-  1. cuts `greptile-hud/train-<timestamp>` from the base branch;
-  2. merges each selected PR's head branch into it server-side;
-  3. opens one combined PR listing everything on board; and
-  4. drops a "🚄 riding the merge train" comment on each source PR.
-
-A PR that unexpectedly conflicts is left behind and reported rather than
-failing the whole train. If nothing lands, or the combined PR can't be opened,
-the scratch branch is deleted — no debris.
-
-**Landing the train.** The assembled card carries a **Merge train** button, so
-one click merges the combined PR without leaving the HUD. That merge prefers a
-real merge commit — the source PRs' own commits reach the base branch inside
-the train's history, so GitHub marks each source PR *merged* and closes it
-itself. On repos that only allow squash merges the HUD falls back to squash and
-closes any source PR still open itself (with a "🚄 Landed via merge train"
-comment), then deletes the scratch branch either way.
-
-Open trains are remembered across restarts: until the combined PR lands, the
-Train tab shows an **Open train** card with the same Merge/Open buttons. If the
-train merges elsewhere (on the web), the next refresh notices it, applies the
-same cleanup to the source PRs and branch, and reports the landing. Trains are
-forgotten after a week, or immediately if their combined PR is closed without
-merging.
 
 ## Your Actions column (GitHub Actions / CI)
 
@@ -339,15 +269,13 @@ Everything comes from the GitHub API via `gh`:
   timestamp drives the live clock
 - one GraphQL call per PR fetches the head-commit time, the Greptile check-run
   state, and the merge metadata (base/head branch, `mergeable`,
-  `mergeStateStatus`, changed files) behind the merge button and trains
+  `mergeStateStatus`, changed files) behind the merge button and the
+  `head → base` branch line on each card
 - the ↻ button posts `@greptile` as an issue comment
 - the merge button calls `PUT /repos/<repo>/pulls/<n>/merge` (squash)
-- a merge train uses `POST /git/refs`, `POST /merges` per PR, then
-  `POST /pulls` for the combined PR; landing one calls
-  `PUT /pulls/<n>/merge` (merge commit, falling back to squash), closes
-  still-open source PRs with `PATCH /pulls/<n>`, and deletes the train branch
-- open trains are remembered in `UserDefaults` (`hud.trains.active`) and
-  reconciled on refresh via `GET /repos/<repo>/pulls/<n>`
+- merge trains built by older versions are still remembered in `UserDefaults`
+  (`hud.trains.active`) and reconciled on refresh via `GET /repos/<repo>/pulls/<n>`,
+  so their source PRs and scratch branch get cleaned up when they land
 - `repos/<repo>/actions/runs?actor=<you>` per open-PR repo → your CI runs for the
   **Your Actions** column (filtered to merge/push/PR/dispatch events)
 
@@ -364,6 +292,5 @@ Everything comes from the GitHub API via `gh`:
   re-tint is a one-file change.
 - **Merge method**: `GH.mergePR` squash-merges; change `merge_method` there for
   merge commits or rebases.
-- **Train compatibility rule**: `PRStore.overlap` in `Sources/GitHub.swift`.
-- **Stack detection**: `PRStore.detectedStacks`; stack building is
-  `GH.buildStack` / `GH.unstack` (both plain `PATCH …/pulls/{n}` base changes).
+- **Stack detection**: `PRStore.detectedStacks` — drives the "stacked on #N"
+  base chip on PR cards.

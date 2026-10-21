@@ -149,6 +149,13 @@ Run stacking lives in `RunStack.stacks(from:)` (Models.swift), not the view, so
 it stays testable. Runs only ever collapse within the same repo + workflow +
 state; never merge differing states into one row.
 
+The column must not jump around between polls: a stack's identity is its
+repo + workflow + state bucket (not its lead run), every sort ends on a unique
+tie-break, known step detail carries over until fresh lookups return, a failed
+repo fetch keeps that repo's previous runs, and `runs` is only reassigned when
+it changed. Background polls are silent — the sweep bar and toggle spinner are
+for the user-initiated Mine/Everyone switch.
+
 ## Loading states
 
 Anything that fetches on click must say so in place: skeleton rows for a first
@@ -180,6 +187,12 @@ clicked control looking idle while its request is in flight.
 
 ## Stacked pull requests
 
+The Train tab (stack/combine builder UI) was removed — nobody used it. What's
+left in the UI is read-only: each PR card shows a `head → base` branch line, and
+a base that is another open PR's branch is drawn as "stacked on #N"
+(`PRStore.parentPR(of:)`). The store-side stack/train code remains; if a builder
+UI ever comes back, these rules apply:
+
 Stack mode is built entirely from base-branch changes (`PATCH /repos/…/pulls/{n}`
 with `base`) — that *is* GitHub's definition of a stack, so no preview API is
 involved. Hold the line on these:
@@ -207,6 +220,9 @@ involved. Hold the line on these:
   draw the fill ring. It is display state — the app delegate owns the behavior.
 
 ## Merge and merge-train invariants
+
+Trains can no longer be built from the HUD, but `syncTrains` still reconciles
+trains remembered from older versions, so keep that cleanup path working.
 
 Merging is irreversible and outward-facing, so:
 

@@ -286,7 +286,7 @@ struct HUDView: View {
     @State private var usernameDraft = ""
     @State private var statsCardSharing = false
     @State private var statsCardError: String?
-    private enum Tab { case open, train, merged, crew }
+    private enum Tab { case open, merged, crew }
 
     private static let staleThreshold: TimeInterval = 14 * 86400
 
@@ -297,7 +297,6 @@ struct HUDView: View {
 
     private var freshPRs: [PR] { store.prs.filter { !isStale($0) } }
     private var stalePRs: [PR] { store.prs.filter { isStale($0) } }
-    private var trainCandidateCount: Int { store.trainGroups.reduce(0) { $0 + $1.prs.count } }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -549,21 +548,16 @@ struct HUDView: View {
     @ViewBuilder private var content: some View {
         switch tab {
         case .open:   openContent
-        case .train:  TrainTab(store: store)
         case .merged: mergedContent
         case .crew:   crewContent
         }
     }
 
-    // Segmented Open / Train / Merged / Crew switcher for the main list.
+    // Segmented Open / Merged / Crew switcher for the main list.
     private var tabBar: some View {
         HStack(spacing: 4) {
             tabButton("Open", icon: "arrow.triangle.branch", count: store.prs.count, on: tab == .open) {
                 showOverview(.open)
-            }
-            tabButton("Train", icon: "tram.fill", count: trainCandidateCount, on: tab == .train,
-                      accent: Tokyo.teal) {
-                showOverview(.train)
             }
             tabButton("Merged", icon: "arrow.triangle.merge", count: store.merged.count, on: tab == .merged) {
                 showOverview(.merged)
@@ -2104,13 +2098,16 @@ struct PRCard: View {
                     if pr.reviewing { reviewingPill }
                     if let why = pr.mergeBlockReason, !pr.reviewing { blockPill(why) }
                 }
-                freshnessLine
+                HStack(spacing: 10) {
+                    freshnessLine
+                    branchLine
+                }
             }
             Spacer(minLength: 8)
             if pr.canQuickMerge { mergeButton }
             rereviewButton
         }
-        .padding(.horizontal, 12).padding(.vertical, 11)
+        .padding(.horizontal, 12).padding(.vertical, 9)
         .background(Tokyo.surface(hovered ? 1 : 0),
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
@@ -2175,6 +2172,50 @@ struct PRCard: View {
             .padding(.horizontal, 7).padding(.vertical, 2)
             .background(Tokyo.orange.opacity(0.13), in: Capsule())
             .help("GitHub won’t merge this right now: \(text)")
+    }
+
+    /// `head → base`: which branch lands where. A base that is another open PR's
+    /// branch is a stack, so it's tinted magenta and names the PR underneath.
+    @ViewBuilder private var branchLine: some View {
+        if let head = pr.headRef, let base = pr.baseRef {
+            let parent = store.parentPR(of: pr)
+            let baseColor = parent == nil ? Tokyo.teal : Tokyo.magenta
+            HStack(spacing: 5) {
+                branchChip(head, icon: "arrow.triangle.branch", color: Tokyo.fgDim,
+                           fill: Tokyo.surface(1), stroke: Tokyo.stroke())
+                    .layoutPriority(0)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(baseColor.opacity(0.85))
+                branchChip(base, icon: parent == nil ? "arrow.triangle.merge" : "square.stack.3d.up",
+                           color: baseColor, fill: baseColor.opacity(0.12),
+                           stroke: baseColor.opacity(0.30))
+                    .layoutPriority(1)
+                if let parent {
+                    Text("stacked on #\(parent.number)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Tokyo.magenta)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            .help(parent.map { "Merges \(head) into \(base) — the branch of #\($0.number) “\($0.title)”" }
+                  ?? "Merges \(head) into \(base)")
+        }
+    }
+
+    private func branchChip(_ name: String, icon: String, color: Color,
+                            fill: Color, stroke: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 8, weight: .bold))
+            Text(name)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .lineLimit(1).truncationMode(.middle)
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 5).padding(.vertical, 1)
+        .background(fill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(stroke))
     }
 
     // Push/review recency — when the PR last got a commit and when Greptile last reviewed.
@@ -2274,590 +2315,6 @@ struct PRCard: View {
     }
 }
 
-// MARK: - Merge train tab
-
-/// Combine several compatible PRs into one branch and one pull request, so a
-/// deploy pipeline runs once instead of once per merge.
-struct TrainTab: View {
-    @ObservedObject var store: PRStore
-
-    private var groups: [TrainGroup] { store.trainGroups }
-    private var selected: [PR] { store.selectedPRs }
-    private var conflicts: [TrainConflict] { store.selectionConflicts }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            controls
-            Rectangle().fill(Tokyo.line).frame(height: 1)
-            // A stack that already exists stays visible (and flattenable) even once
-            // there's nothing left to build from. So does a train in motion.
-            if groups.isEmpty && store.detectedStacks.isEmpty
-                && store.activeTrains.isEmpty && store.trainResult == nil {
-                emptyState
-            } else {
-                ScrollView {
-                    VStack(spacing: 12) {
-                        if let r = store.trainResult { resultCard(r) }
-                        ForEach(store.activeTrains) { t in activeTrainCard(t) }
-                        if let n = store.trainNotice { noticeCard(n) }
-                        if let n = store.stackNotice { noticeCard(n) }
-                        if let e = store.trainError { errorCard(e) }
-                        ForEach(store.detectedStacks) { st in stackCard(st) }
-                        if !conflicts.isEmpty { conflictCard }
-                        if store.trainMode == .stack && selected.count >= 2 { stackOrderCard }
-                        ForEach(groups) { group in groupBlock(group) }
-                    }
-                    .padding(12)
-                    .animation(.easeInOut(duration: 0.2), value: store.trainSelection)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-    }
-
-    private var controls: some View {
-        VStack(spacing: 9) {
-            HStack(spacing: 8) {
-                Image(systemName: "tram.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Tokyo.teal)
-                    .frame(width: 28, height: 28)
-                    .background(Tokyo.teal.opacity(0.14),
-                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Merge train").font(.system(size: 13, weight: .bold))
-                    Text(subtitle)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Tokyo.comment)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 6)
-                modeSwitch
-            }
-            HStack(spacing: 8) {
-                pillButton("Smart select", icon: "wand.and.stars", tone: Tokyo.cyan,
-                           help: "Pick the largest set of PRs on one base branch that don’t touch the same files") {
-                    store.smartSelectTrain()
-                }
-                .disabled(groups.isEmpty || store.trainBuilding)
-                if !selected.isEmpty {
-                    pillButton("Clear", icon: "xmark", tone: Tokyo.comment, help: "Clear the selection") {
-                        store.clearTrainSelection()
-                    }
-                    .disabled(store.trainBuilding)
-                }
-                Spacer(minLength: 4)
-                buildButton
-            }
-        }
-        .padding(.horizontal, 14).padding(.vertical, 11)
-    }
-
-    private var subtitle: String {
-        if selected.isEmpty {
-            return store.trainMode == .stack
-                ? "Chain PRs into a GitHub stack — one landing, reviews intact"
-                : "Merge PRs onto one branch — always a single pipeline"
-        }
-        return "\(selected.count) selected · \(uniqueFileCount) files touched"
-    }
-
-    /// Stack (native GitHub chain) vs Combine (one throwaway branch).
-    private var modeSwitch: some View {
-        HStack(spacing: 3) {
-            ForEach(PRStore.TrainMode.allCases, id: \.rawValue) { mode in
-                Button { store.trainMode = mode } label: {
-                    Text(mode.label)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(store.trainMode == mode ? Tokyo.teal : Tokyo.comment)
-                        .padding(.horizontal, 10)
-                        .frame(height: 24)
-                        .background(store.trainMode == mode ? Tokyo.teal.opacity(0.15) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(mode == .stack
-                      ? "Point each PR at the one below it — GitHub's stacked pull requests"
-                      : "Merge everything onto one new branch and open a single combined PR")
-            }
-        }
-        .padding(3)
-        .background(Tokyo.bgDark.opacity(0.8), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Tokyo.stroke()))
-        .disabled(store.trainBuilding)
-    }
-
-    private var uniqueFileCount: Int {
-        Set(selected.flatMap(\.changedFiles)).count
-    }
-
-    private func pillButton(_ label: String, icon: String, tone: Color, help: String,
-                            action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 10, weight: .bold))
-                Text(label).font(.system(size: 11, weight: .semibold))
-            }
-            .foregroundStyle(tone)
-            .padding(.horizontal, 10)
-            .frame(height: 30)
-            .background(tone.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(tone.opacity(0.3)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
-    }
-
-    /// File overlap blocks a Combine (it merges immediately, so a clash is fatal)
-    /// but only warns for a Stack — nothing is merged when stacking, and GitHub
-    /// reports each layer's mergeability afterwards.
-    private var canBuild: Bool {
-        guard selected.count >= 2, !store.trainBuilding else { return false }
-        return store.trainMode == .stack || conflicts.isEmpty
-    }
-
-    private var buildButton: some View {
-        Button {
-            Task {
-                if store.trainMode == .stack { await store.buildStack() }
-                else { await store.buildTrain() }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                if store.trainBuilding { Spinner(size: 11, color: Tokyo.bgDark) }
-                else {
-                    Image(systemName: store.trainMode == .stack
-                          ? "square.3.layers.3d.top.filled" : "arrow.triangle.merge")
-                        .font(.system(size: 11, weight: .bold))
-                }
-                Text(buildLabel)
-                    .font(.system(size: 12, weight: .bold))
-            }
-            .foregroundStyle(canBuild ? Tokyo.bgDark : Tokyo.comment)
-            .padding(.horizontal, 12)
-            .frame(height: 30)
-            .background(canBuild ? Tokyo.teal : Tokyo.surface(1),
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(canBuild ? .clear : Tokyo.stroke()))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!canBuild)
-        .help(buildHelp)
-    }
-
-    private var buildLabel: String {
-        if store.trainBuilding { return store.trainMode == .stack ? "Stacking…" : "Building…" }
-        let n = selected.count >= 2 ? " (\(selected.count))" : ""
-        return store.trainMode == .stack ? "Stack\(n)" : "Build train\(n)"
-    }
-
-    private var buildHelp: String {
-        if selected.count < 2 { return "Select at least two pull requests" }
-        if store.trainMode == .stack {
-            return "Point each PR at the one below it, highest confidence at the bottom. Nothing merges — this only changes base branches, and Flatten undoes it."
-        }
-        return conflicts.isEmpty
-            ? "Cut a branch, merge every selected PR into it, and open one combined pull request"
-            : "Resolve the file overlaps first"
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "tram.fill")
-                .font(.system(size: 22, weight: .medium))
-                .foregroundStyle(Tokyo.comment)
-                .frame(width: 48, height: 48)
-                .background(Tokyo.surface(0), in: Circle())
-                .overlay(Circle().strokeBorder(Tokyo.stroke()))
-            Text("No train to run")
-                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Tokyo.fgDim)
-            Text("Needs two or more mergeable PRs on the same repo and base branch.")
-                .font(.system(size: 11)).foregroundStyle(Tokyo.comment)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(24)
-    }
-
-    private func groupBlock(_ group: TrainGroup) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Tokyo.teal)
-                Text(group.repo.split(separator: "/").last.map(String.init) ?? group.repo)
-                    .font(.system(size: 12, weight: .bold))
-                Text("→ \(group.base)")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Tokyo.comment)
-                Spacer(minLength: 4)
-                Text("\(group.prs.count) candidates")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Tokyo.comment)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Tokyo.surface(1), in: Capsule())
-            }
-            VStack(spacing: 6) {
-                ForEach(group.prs) { pr in
-                    TrainRow(pr: pr,
-                             selected: store.trainSelection.contains(pr.id),
-                             clash: clashLabel(for: pr),
-                             toggle: { store.toggleTrainSelection(pr) })
-                }
-            }
-        }
-        .padding(11)
-        .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Tokyo.stroke()))
-    }
-
-    /// If this (unselected) PR would collide with the current selection, say so
-    /// up front rather than letting the build discover it.
-    private func clashLabel(for pr: PR) -> String? {
-        guard !store.trainSelection.contains(pr.id) else { return nil }
-        var files = 0
-        var with: Int?
-        for other in selected {
-            let shared = store.overlap(pr, other)
-            if !shared.isEmpty {
-                files += shared.count
-                if with == nil { with = other.number }
-            }
-        }
-        guard let with else { return nil }
-        return "shares \(files) file\(files == 1 ? "" : "s") with #\(with)"
-    }
-
-    private var conflictCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10, weight: .bold))
-                Text(store.trainMode == .stack
-                     ? "Overlapping files — these layers may conflict"
-                     : "These can’t ride together")
-                    .font(.system(size: 11, weight: .bold))
-            }
-            .foregroundStyle(Tokyo.orange)
-            ForEach(conflicts) { c in
-                Text("\(shortID(c.a)) ↔ \(shortID(c.b)) — \(c.reason): \(c.paths.prefix(3).joined(separator: ", "))\(c.paths.count > 3 ? "…" : "")")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(Tokyo.fgDim)
-                    .lineLimit(1)
-            }
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tokyo.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .strokeBorder(Tokyo.orange.opacity(0.3)))
-    }
-
-    /// A stack that already exists on GitHub, drawn bottom-up the way the merge
-    /// box shows it.
-    private func stackCard(_ stack: PRStack) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: "square.3.layers.3d.top.filled")
-                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokyo.teal)
-                Text("Stack of \(stack.prs.count)").font(.system(size: 12, weight: .bold))
-                Text("→ \(stack.trunk)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Tokyo.comment)
-                Spacer(minLength: 4)
-                if let top = stack.top {
-                    pillButton("Top PR", icon: "arrow.up.forward", tone: Tokyo.teal,
-                               help: "Open #\(top.number) — merge from here to land the stack bottom-up") {
-                        openWebURL(top.url)
-                    }
-                }
-                pillButton("Flatten", icon: "arrow.down.right.and.arrow.up.left", tone: Tokyo.comment,
-                           help: "Point every PR back at \(stack.trunk)") {
-                    Task { await store.flatten(stack) }
-                }
-                .disabled(store.trainBuilding)
-            }
-            // Top of the stack first, mirroring GitHub's stack map.
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(stack.prs.enumerated().reversed()), id: \.element.id) { idx, pr in
-                    HStack(spacing: 8) {
-                        Text("\(idx + 1)")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundStyle(Tokyo.comment)
-                            .frame(width: 14)
-                        Rectangle().fill(Tokyo.teal.opacity(0.5)).frame(width: 2, height: 20)
-                        Text("#\(pr.number)")
-                            .font(.system(size: 10, weight: .bold)).foregroundStyle(Tokyo.teal)
-                        Text(pr.title)
-                            .font(.system(size: 11)).foregroundStyle(Tokyo.fgDim).lineLimit(1)
-                        if let why = pr.mergeBlockReason {
-                            Text(why)
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(Tokyo.orange)
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(Tokyo.orange.opacity(0.13), in: Capsule())
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { openWebURL(pr.url) }
-                }
-                HStack(spacing: 8) {
-                    Text("").frame(width: 14)
-                    Image(systemName: "arrow.down").font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Tokyo.comment).frame(width: 2)
-                    Text(stack.trunk)
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Tokyo.comment)
-                }
-                .padding(.top, 2)
-            }
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tokyo.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .strokeBorder(Tokyo.teal.opacity(0.28)))
-    }
-
-    /// Preview of the order the current selection would be stacked in.
-    private var stackOrderCard: some View {
-        let order = store.stackOrder
-        return VStack(alignment: .leading, spacing: 5) {
-            Text("Stack order — bottom lands first")
-                .font(.system(size: 10, weight: .bold)).textCase(.uppercase)
-                .foregroundStyle(Tokyo.comment).kerning(1.1)
-            Text(order.map { "#\($0.number)" }.joined(separator: "  →  "))
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundStyle(Tokyo.teal)
-                .lineLimit(2)
-            Text("Highest Greptile score sits at the bottom. Nothing merges — stacking only re-points base branches, and Flatten undoes it.")
-                .font(.system(size: 10)).foregroundStyle(Tokyo.comment)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Tokyo.stroke()))
-    }
-
-    private func noticeCard(_ text: String) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: "checkmark.seal.fill").font(.system(size: 11, weight: .bold))
-            Text(text).font(.system(size: 11, weight: .semibold)).lineLimit(2)
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(Tokyo.teal)
-        .padding(11)
-        .background(Tokyo.teal.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .strokeBorder(Tokyo.teal.opacity(0.3)))
-    }
-
-    private func shortID(_ id: String) -> String {
-        "#" + (id.split(separator: "#").last.map(String.init) ?? id)
-    }
-
-    private func resultCard(_ r: TrainResult) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: r.state == .landed ? "checkmark.seal.fill" : "tram.fill")
-                    .font(.system(size: 11, weight: .bold))
-                Text(r.state == .landed
-                     ? "Train landed — \(r.mergedPRs.count) PR\(r.mergedPRs.count == 1 ? "" : "s"), one pipeline"
-                     : "Train assembled — \(r.mergedPRs.count) PR\(r.mergedPRs.count == 1 ? "" : "s"), one pipeline")
-                    .font(.system(size: 12, weight: .bold))
-                Spacer(minLength: 4)
-                if let train = store.activeTrain(for: r) {
-                    Button {
-                        Task { await store.mergeTrain(train) }
-                    } label: {
-                        HStack(spacing: 5) {
-                            if r.state == .merging { Spinner(size: 11, color: Tokyo.bgDark) }
-                            else {
-                                Image(systemName: "arrow.triangle.merge")
-                                    .font(.system(size: 10, weight: .bold))
-                            }
-                            Text(r.state == .merging ? "Merging…" : "Merge train")
-                                .font(.system(size: 11, weight: .bold))
-                        }
-                        .foregroundStyle(Tokyo.bgDark)
-                        .padding(.horizontal, 10).frame(height: 26)
-                        .background(Tokyo.green, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(store.trainBuilding || r.state != .assembled)
-                    .help("Merge the combined PR now — source PRs close automatically when it lands")
-                }
-                if let url = r.url, !url.isEmpty {
-                    Button { openWebURL(url) } label: {
-                        Text(r.state == .landed ? "Open PR" : "Open")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Tokyo.green)
-                            .padding(.horizontal, 10).frame(height: 26)
-                            .background(Tokyo.green.opacity(0.12),
-                                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .strokeBorder(Tokyo.green.opacity(0.35)))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .foregroundStyle(Tokyo.green)
-            Text(r.branch)
-                .font(.system(size: 10, design: .monospaced)).foregroundStyle(Tokyo.comment)
-            if !r.skipped.isEmpty {
-                Text("Left behind: " + r.skipped.map { "#\($0.0) (\($0.1))" }.joined(separator: ", "))
-                    .font(.system(size: 10)).foregroundStyle(Tokyo.orange)
-            }
-            if r.state == .landed {
-                Text(r.closedPRs.isEmpty
-                     ? "Source PRs are done — GitHub marked them merged along with the train."
-                     : "Closed " + r.closedPRs.map { "#\($0)" }.joined(separator: ", ") + ".")
-                    .font(.system(size: 10)).foregroundStyle(Tokyo.fgDim)
-            } else if store.activeTrain(for: r) != nil {
-                Text("One click merges the combined PR and closes every source PR — no trip to the browser.")
-                    .font(.system(size: 10)).foregroundStyle(Tokyo.comment)
-            }
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tokyo.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .strokeBorder(Tokyo.green.opacity(0.3)))
-    }
-
-    /// A train built earlier whose combined PR is still open — kept across
-    /// launches, still landable in one click.
-    private func activeTrainCard(_ t: ActiveTrain) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 7) {
-                Image(systemName: "tram.fill")
-                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokyo.teal)
-                Text("Open train #\(t.number)")
-                    .font(.system(size: 12, weight: .bold))
-                Text("\(t.prs.count) PR\(t.prs.count == 1 ? "" : "s") riding")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Tokyo.comment)
-                Spacer(minLength: 4)
-                if !t.url.isEmpty {
-                    pillButton("Merge", icon: "arrow.triangle.merge", tone: Tokyo.green,
-                               help: "Merge the combined PR now — source PRs close automatically when it lands") {
-                        Task { await store.mergeTrain(t) }
-                    }
-                    .disabled(store.trainBuilding)
-                    pillButton("Open", icon: "arrow.up.forward", tone: Tokyo.teal,
-                               help: "Open #\(t.number)") { openWebURL(t.url) }
-                }
-            }
-            Text(t.prs.map { "#\($0)" }.joined(separator: " + "))
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Tokyo.teal)
-            Text("\(t.repo) · \(t.branch) → \(t.base)")
-                .font(.system(size: 9, design: .monospaced)).foregroundStyle(Tokyo.comment)
-            if !t.skipped.isEmpty {
-                Text("Left behind: " + t.skipped.joined(separator: ", "))
-                    .font(.system(size: 10)).foregroundStyle(Tokyo.orange)
-            }
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tokyo.teal.opacity(0.07), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .strokeBorder(Tokyo.teal.opacity(0.28)))
-    }
-
-    private func errorCard(_ text: String) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: "xmark.octagon.fill").font(.system(size: 11, weight: .bold))
-            Text(text).font(.system(size: 11, weight: .medium)).lineLimit(3)
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(Tokyo.red)
-        .padding(11)
-        .background(Tokyo.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .strokeBorder(Tokyo.red.opacity(0.3)))
-    }
-}
-
-/// One selectable PR inside a train group.
-struct TrainRow: View {
-    let pr: PR
-    let selected: Bool
-    let clash: String?
-    let toggle: () -> Void
-    @State private var hovered = false
-
-    private var scoreColor: Color {
-        guard let n = pr.scoreNum, let d = pr.scoreDen, d > 0 else { return Tokyo.comment }
-        let r = Double(n) / Double(d)
-        if r >= 1.0 { return Tokyo.green }
-        if r >= 0.8 { return Tokyo.teal }
-        if r >= 0.6 { return Tokyo.yellow }
-        return Tokyo.orange
-    }
-
-    var body: some View {
-        Button(action: toggle) {
-            HStack(spacing: 10) {
-                Image(systemName: selected ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(selected ? Tokyo.teal : Tokyo.comment)
-                Text(pr.hasScore ? "\(pr.scoreNum ?? 0)/\(pr.scoreDen ?? 5)" : "—/5")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(scoreColor)
-                    .frame(width: 32)
-                    .padding(.vertical, 3)
-                    .background(scoreColor.opacity(0.13), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(pr.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    HStack(spacing: 6) {
-                        Text("#\(pr.number)")
-                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(Tokyo.comment)
-                        Text("\(pr.changedFiles.count) file\(pr.changedFiles.count == 1 ? "" : "s")")
-                            .font(.system(size: 10)).foregroundStyle(Tokyo.comment)
-                        if let clash {
-                            Text(clash)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Tokyo.orange)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                Spacer(minLength: 6)
-                Button { openWebURL(pr.url) } label: {
-                    Image(systemName: "arrow.up.forward.square")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Tokyo.comment)
-                        .frame(width: 26, height: 26)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Open #\(pr.number) on GitHub")
-            }
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 42)
-            .background(selected ? Tokyo.teal.opacity(0.12) : Tokyo.surface(hovered ? 1 : 0),
-                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(selected ? Tokyo.teal.opacity(0.45)
-                                       : (clash != nil ? Tokyo.orange.opacity(0.28) : Tokyo.stroke())))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 }
-        .help(clash ?? "Add #\(pr.number) to the train")
-    }
-}
-
 // MARK: - GitHub Actions column (CI you triggered, e.g. via merges)
 
 struct RunsColumn: View {
@@ -2949,7 +2406,7 @@ struct RunsColumn: View {
                     }
                 }
                 .padding(12)
-                .animation(.easeInOut(duration: 0.22), value: store.runs.map(\.id))
+                .animation(.easeInOut(duration: 0.22), value: stacks.map(\.id))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
