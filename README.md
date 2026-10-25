@@ -192,6 +192,15 @@ vibecoders integration with the `backend/` service:
   you run the HUD app). The heartbeat sends only your username, the app name,
   and a timestamp — no code, no keystrokes, no repo data. If you explicitly start
   a status, its emoji, activity label, and start time are also shared until you stop it.
+- **Standalone agent (no HUD app)** — the same beats come from
+  `backend/client/devtime.sh`, for anyone running the tracker without the app.
+  Configure it with `VC_API_URL` (e.g.
+  `https://greptile-hud.onrender.com`), `VC_USER` (a self-chosen
+  username), and optionally `VC_INTERVAL` (seconds between checks, default
+  60), `VC_APPS` (comma-separated process names to watch, with sensible dev-app
+  defaults), and `VC_IDLE_CUTOFF` (stop beating after this many idle seconds,
+  default 900, macOS only). A launchd agent example ships alongside it in
+  `backend/client/launchd-example.plist`.
 
 Menu-bar: Vibecoders ▸ Join the devtime leaderboard, Online now, Leaderboard,
 Refresh, Change username, Forget username.
