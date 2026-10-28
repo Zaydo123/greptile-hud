@@ -147,7 +147,11 @@ human-trigger event filter, or the column fills with cron noise.
 
 Run stacking lives in `RunStack.stacks(from:)` (Models.swift), not the view, so
 it stays testable. Runs only ever collapse within the same repo + workflow +
-state; never merge differing states into one row.
+state; never merge differing states into one row. "Workflow" means the YAML
+file (`WorkflowRun.workflowKey`, from the run's `path`), falling back to the
+name — `run-name` varies per run and must not split a stack. Search
+(`RunStack.matches`) filters runs *before* stacking, and every `RunSort` order
+ends on the stack key.
 
 The column must not jump around between polls: a stack's identity is its
 repo + workflow + state bucket (not its lead run), every sort ends on a unique

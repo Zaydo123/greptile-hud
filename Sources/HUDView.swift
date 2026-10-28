@@ -60,6 +60,182 @@ struct Spinner: View {
     }
 }
 
+// MARK: - Native chrome (macOS-style building blocks, Tokyo-tinted)
+
+/// System Settings–style grouped list: one rounded well, rows separated by
+/// inset hairlines. Rows draw their own hover highlight; the well clips it.
+struct InsetGroup<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        VStack(spacing: 0) { content }
+            .background(Tokyo.surface(0), in: shape)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
+    }
+}
+
+/// Inset hairline between rows of an `InsetGroup`.
+struct RowDivider: View {
+    var inset: CGFloat = 12
+    var body: some View {
+        Rectangle().fill(Tokyo.line.opacity(0.8)).frame(height: 0.5)
+            .padding(.leading, inset)
+    }
+}
+
+/// `InsetGroup` over a collection, with dividers between rows.
+struct InsetList<Item: Identifiable, Row: View>: View {
+    let items: [Item]
+    var dividerInset: CGFloat = 12
+    @ViewBuilder var row: (Item) -> Row
+    var body: some View {
+        InsetGroup {
+            ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
+                if i > 0 { RowDivider(inset: dividerInset) }
+                row(item)
+            }
+        }
+    }
+}
+
+/// Borderless toolbar button: just a glyph until hovered, like a macOS toolbar.
+struct ToolbarIconButton: View {
+    let symbol: String?          // nil = busy spinner
+    let help: String
+    var tint: Color = Tokyo.fgDim
+    var lit: Bool = false
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if let symbol { Image(systemName: symbol) }
+                else { Spinner(size: 12, color: Tokyo.comment) }
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(lit ? tint : (hovered ? Tokyo.fg : tint))
+            .frame(width: 30, height: 30)
+            .background((lit ? tint.opacity(0.16) : (hovered ? Tokyo.surface(2) : .clear)),
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(help)
+    }
+}
+
+/// macOS segmented control with a sliding raised thumb.
+struct SegmentedControl<Value: Hashable>: View {
+    struct Segment: Identifiable {
+        let value: Value
+        let label: String
+        var icon: String? = nil
+        var count: Int? = nil
+        var busy: Bool = false
+        var id: Value { value }
+    }
+    let segments: [Segment]
+    let selection: Value
+    var height: CGFloat = 30
+    var accent: (Value) -> Color = { _ in Tokyo.blue }
+    let onSelect: (Value) -> Void
+    @Namespace private var ns
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(segments) { seg in
+                let on = seg.value == selection
+                Button { onSelect(seg.value) } label: {
+                    HStack(spacing: 6) {
+                        if seg.busy { Spinner(size: 9, color: accent(seg.value)) }
+                        else if let icon = seg.icon {
+                            Image(systemName: icon)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(on ? accent(seg.value) : Tokyo.comment)
+                        }
+                        Text(seg.label)
+                            .font(.system(size: 12, weight: on ? .semibold : .medium))
+                            .lineLimit(1)
+                        if let c = seg.count {
+                            Text("\(c)")
+                                .font(.system(size: 11, weight: .medium))
+                                .monospacedDigit()
+                                .foregroundStyle(Tokyo.comment)
+                        }
+                    }
+                    .foregroundStyle(on ? Tokyo.fg : Tokyo.fgDim)
+                    .frame(maxWidth: .infinity, minHeight: height - 4)
+                    .background {
+                        if on {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Tokyo.bgHighlight)
+                                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(Tokyo.fg.opacity(0.08), lineWidth: 0.5))
+                                .shadow(color: Tokyo.bgDark.opacity(0.6), radius: 2, y: 1)
+                                .matchedGeometryEffect(id: "thumb", in: ns)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .frame(height: height)
+        .background(Tokyo.bgDark.opacity(0.65), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: selection)
+    }
+}
+
+/// Native-style section header that sits above an `InsetGroup`.
+struct SectionHeader<Trailing: View>: View {
+    let title: String
+    @ViewBuilder var trailing: Trailing
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Tokyo.fgDim)
+            trailing
+        }
+        .padding(.horizontal, 4)
+    }
+}
+
+extension SectionHeader where Trailing == EmptyView {
+    init(_ title: String) { self.title = title; self.trailing = EmptyView() }
+}
+
+/// Activity-ring score gauge: the ring fills to the Greptile score.
+struct ScoreRing: View {
+    var fraction: Double          // 0…1; ignored when `dashed`
+    var color: Color
+    var dashed = false
+    var size: CGFloat = 40
+    var body: some View {
+        let w: CGFloat = 3.5
+        ZStack {
+            if dashed {
+                Circle().strokeBorder(color.opacity(0.55),
+                                      style: StrokeStyle(lineWidth: 1.25, dash: [2.5, 3]))
+            } else {
+                Circle().stroke(color.opacity(0.18), lineWidth: w).padding(w / 2)
+                Circle()
+                    .trim(from: 0, to: max(0.001, min(1, fraction)))
+                    .stroke(color, style: StrokeStyle(lineWidth: w, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .padding(w / 2)
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
 // MARK: - Loading placeholders
 
 /// A 2pt sweep used as a "working on it" line under a section header.
@@ -106,13 +282,11 @@ struct SkeletonBar: View {
     }
 }
 
-/// Placeholder in the shape of a `PRCard`, shown on the very first load.
+/// Placeholder in the shape of a `PRCard` row (sits inside an `InsetGroup`).
 struct PRCardSkeleton: View {
     var body: some View {
         HStack(spacing: 12) {
-            Capsule().fill(Tokyo.surface(1)).frame(width: 4, height: 42)
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Tokyo.surface(1)).frame(width: 56, height: 48)
+            Circle().fill(Tokyo.surface(1)).frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 8) {
                 SkeletonBar(width: 240, height: 11)
                 SkeletonBar(width: 150, height: 9)
@@ -121,27 +295,23 @@ struct PRCardSkeleton: View {
             Spacer(minLength: 8)
         }
         .padding(.horizontal, 12).padding(.vertical, 11)
-        .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Tokyo.stroke()))
     }
 }
 
-/// Placeholder in the shape of a `RunRow`.
+/// Placeholder in the shape of a `RunRow` (sits inside an `InsetGroup`).
 struct RunRowSkeleton: View {
     var body: some View {
-        HStack(spacing: 9) {
-            Capsule().fill(Tokyo.surface(1)).frame(width: 3, height: 30)
+        HStack(alignment: .top, spacing: 9) {
+            Circle().fill(Tokyo.surface(1)).frame(width: 14, height: 14)
             VStack(alignment: .leading, spacing: 7) {
                 SkeletonBar(width: 120, height: 10)
-                SkeletonBar(width: 160, height: 8)
+                SkeletonBar(width: 150, height: 8)
                 SkeletonBar(width: 80, height: 8)
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10).padding(.vertical, 9)
+        .padding(.horizontal, 10).padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Tokyo.stroke()))
     }
 }
 
@@ -299,6 +469,7 @@ struct HUDView: View {
     private var stalePRs: [PR] { store.prs.filter { isStale($0) } }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 header
@@ -306,7 +477,7 @@ struct HUDView: View {
                 if let err = store.errorText {
                     banner(err, color: Tokyo.orange, icon: "exclamationmark.triangle.fill")
                 }
-                Rectangle().fill(Tokyo.line).frame(height: 1)
+                Rectangle().fill(Tokyo.line).frame(height: 0.5)
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .id(navigationRevision)
@@ -317,22 +488,22 @@ struct HUDView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if !store.runs.isEmpty {
-                Rectangle().fill(Tokyo.line).frame(width: 1)
-                RunsColumn(store: store).frame(width: 240)
+                Rectangle().fill(Tokyo.line).frame(width: 0.5)
+                RunsColumn(store: store, onTextEditing: onTextEditing).frame(width: 248)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
+            // Frosted, like a real HUD window — the Tokyo tint keeps it on-theme.
             ZStack {
                 Rectangle().fill(.ultraThinMaterial)
-                LinearGradient(colors: [Tokyo.bg.opacity(0.97), Tokyo.bgDark.opacity(0.98)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                LinearGradient(colors: [Tokyo.bg.opacity(0.88), Tokyo.bgDark.opacity(0.92)],
+                               startPoint: .top, endPoint: .bottom)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .strokeBorder(Tokyo.border.opacity(0.9), lineWidth: 1))
-        .shadow(color: .black.opacity(0.55), radius: 30, y: 14)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(Tokyo.fg.opacity(0.12), lineWidth: 0.5))
+        .shadow(color: Tokyo.bgDark.opacity(0.7), radius: 28, y: 12)
         .padding(HUDMetrics.padding)
         .tint(Tokyo.blue)
         .foregroundStyle(Tokyo.fg)
@@ -348,46 +519,50 @@ struct HUDView: View {
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(color)
         .padding(.horizontal, 11).padding(.vertical, 8)
-        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(color.opacity(0.28)))
+        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .strokeBorder(color.opacity(0.28), lineWidth: 0.5))
         .padding(.horizontal, 16).padding(.bottom, 10)
     }
 
     private var reviewingCount: Int { store.prs.filter { $0.reviewing }.count }
 
     private var header: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 10) {
+            // App-icon tile.
             Image(systemName: "eyes")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Tokyo.blue)
-                .frame(width: 34, height: 34)
-                .background(Tokyo.blue.opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Tokyo.blue.opacity(0.30)))
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 7) {
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Tokyo.bgDark)
+                .frame(width: 32, height: 32)
+                .background(LinearGradient(colors: [Tokyo.blue, Tokyo.magenta],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Tokyo.fg.opacity(0.18), lineWidth: 0.5))
+                .shadow(color: Tokyo.bgDark.opacity(0.5), radius: 2, y: 1)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("Greptile Reviews")
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
                     if !store.prs.isEmpty {
                         Text("\(store.prs.count)")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Tokyo.fgDim)
-                            .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(Tokyo.surface(1), in: Capsule())
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Tokyo.comment)
+                            .monospacedDigit()
                             .fixedSize()
                     }
                 }
                 if vibecoders.hasUsername {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 4) {
                         Text("@\(vibecoders.username)")
-                        Text("·").foregroundStyle(Tokyo.comment.opacity(0.7))
-                        Image(systemName: "bolt.fill").foregroundStyle(Tokyo.magenta)
+                        Text("·").foregroundStyle(Tokyo.comment)
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 9)).foregroundStyle(Tokyo.magenta)
                         Text("\(vcDuration(vibecoders.devtimeToday)) today")
                             .monospacedDigit()
                     }
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11))
                     .foregroundStyle(Tokyo.fgDim)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -398,21 +573,23 @@ struct HUDView: View {
             Spacer(minLength: 8)
             if reviewingCount > 0 {
                 HStack(spacing: 5) {
-                    Spinner(size: 10, color: Tokyo.blue)
-                    Text("\(reviewingCount) active")
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokyo.blue)
+                    Spinner(size: 9, color: Tokyo.blue)
+                    Text("\(reviewingCount) reviewing")
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(Tokyo.blue)
                 }
-                .padding(.horizontal, 8).padding(.vertical, 4)
+                .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Tokyo.blue.opacity(0.14), in: Capsule())
                 .fixedSize()
             }
             clock
-            latchIndicator
-            iconButton(store.refreshing ? nil : "arrow.clockwise", help: "Refresh now") {
-                Task { await store.refresh(force: true) }
+            HStack(spacing: 2) {
+                latchIndicator
+                ToolbarIconButton(symbol: store.refreshing ? nil : "arrow.clockwise", help: "Refresh now") {
+                    Task { await store.refresh(force: true) }
+                }
+                .disabled(store.refreshing)
+                ToolbarIconButton(symbol: "xmark", help: "Close", action: onClose)
             }
-            .disabled(store.refreshing)
-            iconButton("xmark", help: "Close", action: onClose)
         }
         .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
     }
@@ -421,19 +598,16 @@ struct HUDView: View {
     /// something running, not a screenshot.
     private var clock: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { ctx in
-            VStack(alignment: .trailing, spacing: 1) {
+            VStack(alignment: .trailing, spacing: 0) {
                 Text(HUDClock.time.string(from: ctx.date))
-                    .font(.system(size: 15, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Tokyo.cyan)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Tokyo.fg)
                     .monospacedDigit()
                 Text(syncLine(ctx.date))
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .font(.system(size: 10))
                     .foregroundStyle(Tokyo.comment)
             }
-            .padding(.horizontal, 9).padding(.vertical, 5)
-            .background(Tokyo.bgDark.opacity(0.7), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(Tokyo.border.opacity(0.6)))
+            .padding(.trailing, 4)
             .help("Local time · \(HUDClock.date.string(from: ctx.date))")
         }
         .fixedSize()
@@ -444,31 +618,23 @@ struct HUDView: View {
     @ViewBuilder private var latchIndicator: some View {
         if hud.pinned {
             // One click drops the latch — unpinning is never a hold.
-            Button(action: onClose) {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Tokyo.magenta)
-                    .frame(width: 30, height: 30)
-                    .background(Tokyo.magenta.opacity(0.16), in: RoundedRectangle(cornerRadius: 9))
-                    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Tokyo.magenta.opacity(0.4)))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Latched open — click or press Esc to close")
+            ToolbarIconButton(symbol: "pin.fill",
+                              help: "Latched open — click or press Esc to close",
+                              tint: Tokyo.magenta, lit: true, action: onClose)
         } else if let start = hud.holdStartedAt {
             TimelineView(.animation) { ctx in
                 let p = min(1, max(0, ctx.date.timeIntervalSince(start) / HUDState.latchDelay))
                 ZStack {
-                    Circle().strokeBorder(Tokyo.border.opacity(0.5), lineWidth: 2)
+                    Circle().stroke(Tokyo.border.opacity(0.5), lineWidth: 2)
                     Circle()
                         .trim(from: 0, to: p)
                         .stroke(Tokyo.magenta, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                     Image(systemName: "pin")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(p >= 1 ? Tokyo.magenta : Tokyo.comment)
                 }
-                .frame(width: 26, height: 26)
+                .frame(width: 20, height: 20)
                 .frame(width: 30, height: 30)
             }
             .help("Keep holding Right ⇧ to latch the HUD open")
@@ -476,73 +642,55 @@ struct HUDView: View {
     }
 
     private func syncLine(_ now: Date) -> String {
-        guard let d = store.lastRefresh else { return "no sync yet" }
+        guard let d = store.lastRefresh else { return "Not synced yet" }
         let s = Int(now.timeIntervalSince(d))
-        if s < 5 { return "synced now" }
-        if s < 60 { return "synced \(s)s ago" }
-        return "synced \(s / 60)m ago"
+        if s < 5 { return "Synced just now" }
+        if s < 60 { return "Synced \(s)s ago" }
+        return "Synced \(s / 60)m ago"
     }
 
-    private func iconButton(_ symbol: String?, help: String,
-                            action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Group {
-                if let symbol { Image(systemName: symbol) }
-                else { Spinner(size: 12, color: Tokyo.comment) }
-            }
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(Tokyo.fgDim)
-            .frame(width: 30, height: 30)
-            .background(Tokyo.surface(1), in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Tokyo.stroke()))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
-    }
-
-    /// Thin Bebop send-off bar with the session clock.
+    /// Quiet status bar: Bebop send-off, running status, session clock.
     private var footer: some View {
         HStack(spacing: 8) {
             Text(Bebop.signoff)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .kerning(1.6)
-                .foregroundStyle(Tokyo.comment.opacity(0.85))
+                .font(.system(size: 10, weight: .medium))
+                .tracking(0.8)
+                .foregroundStyle(Tokyo.comment)
                 .fixedSize()
             Spacer(minLength: 6)
             if let status = statuses.active {
                 TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                     HStack(spacing: 5) {
                         Text(status.emoji.isEmpty ? "●" : status.emoji)
-                        Text(status.displayLabel.uppercased())
+                        Text(status.displayLabel)
                             .lineLimit(1)
                         Text(hudDuration(status.startedAt, ctx.date))
                             .monospacedDigit()
                     }
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Tokyo.yellow)
                 }
                 .help("Local status running")
             } else {
                 Text(Bebop.sessionTitle)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .kerning(1.2)
-                    .foregroundStyle(Tokyo.comment.opacity(0.6))
+                    .font(.system(size: 10, weight: .medium))
+                    .tracking(0.8)
+                    .foregroundStyle(Tokyo.comment.opacity(0.7))
                     .lineLimit(1)
             }
             Spacer(minLength: 6)
             TimelineView(.periodic(from: Date(), by: 1)) { ctx in
-                Text("UPTIME \(hudDuration(HUDClock.launchedAt, ctx.date))")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Tokyo.comment.opacity(0.85))
+                Text("Up \(hudDuration(HUDClock.launchedAt, ctx.date))")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Tokyo.comment)
                     .monospacedDigit()
             }
             ResizeGrip(onChanged: onResize, onEnded: onResizeEnded)
         }
         .padding(.leading, 16).padding(.trailing, 4)
-        .frame(height: 22)
-        .background(Tokyo.bgDark.opacity(0.55))
-        .overlay(Rectangle().fill(Tokyo.line).frame(height: 1), alignment: .top)
+        .frame(height: 24)
+        .background(Tokyo.bgDark.opacity(0.35))
+        .overlay(Rectangle().fill(Tokyo.line).frame(height: 0.5), alignment: .top)
     }
 
     @ViewBuilder private var content: some View {
@@ -555,22 +703,19 @@ struct HUDView: View {
 
     // Segmented Open / Merged / Crew switcher for the main list.
     private var tabBar: some View {
-        HStack(spacing: 4) {
-            tabButton("Open", icon: "arrow.triangle.branch", count: store.prs.count, on: tab == .open) {
-                showOverview(.open)
-            }
-            tabButton("Merged", icon: "arrow.triangle.merge", count: store.merged.count, on: tab == .merged) {
-                showOverview(.merged)
-            }
-            tabButton("Crew", icon: "person.3", count: vibecoders.online.count, on: tab == .crew,
-                      accent: Tokyo.magenta) {
-                showOverview(.crew)
-            }
-        }
-        .padding(4)
-        .background(Tokyo.bgDark.opacity(0.75), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .strokeBorder(Tokyo.stroke()))
+        SegmentedControl<Tab>(
+            segments: [
+                .init(value: .open, label: "Open", icon: "arrow.triangle.branch", count: store.prs.count),
+                .init(value: .merged, label: "Merged", icon: "arrow.triangle.merge", count: store.merged.count),
+                .init(value: .crew, label: "Crew", icon: "person.2.fill", count: vibecoders.online.count),
+            ],
+            selection: tab,
+            height: 32,
+            accent: { $0 == .crew ? Tokyo.magenta : Tokyo.blue },
+            onSelect: showOverview
+        )
+        .frame(maxWidth: 480)
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16).padding(.bottom, 12)
     }
 
@@ -584,92 +729,69 @@ struct HUDView: View {
         navigationRevision += 1
     }
 
-    private func tabButton(_ label: String, icon: String, count: Int, on: Bool,
-                           accent: Color = Tokyo.blue,
-                           _ act: @escaping () -> Void) -> some View {
-        Button(action: act) {
-            HStack(spacing: 7) {
-                Image(systemName: icon).font(.system(size: 11, weight: .semibold))
-                Text(label).font(.system(size: 12, weight: .semibold))
-                Text("\(count)")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(on ? accent : Tokyo.comment)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(on ? accent.opacity(0.18) : Tokyo.surface(0), in: Capsule())
-            }
-            .foregroundStyle(on ? accent : Tokyo.comment)
-            .frame(maxWidth: .infinity, minHeight: 34)
-            .background(on ? accent.opacity(0.13) : .clear,
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(on ? accent.opacity(0.35) : .clear))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(on ? "Back to \(label) overview" : "Show \(label.lowercased())")
-    }
-
     @ViewBuilder private var openContent: some View {
         if store.prs.isEmpty && store.refreshing {
             ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(0..<4, id: \.self) { _ in PRCardSkeleton() }
+                InsetGroup {
+                    ForEach(0..<4, id: \.self) { i in
+                        if i > 0 { RowDivider(inset: 64) }
+                        PRCardSkeleton()
+                    }
                 }
-                .padding(12)
+                .padding(14)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if store.prs.isEmpty {
             emptyState(icon: "checkmark.seal", text: "No open PRs", sub: "The gate is clear, cowboy.")
         } else {
             ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(freshPRs) { pr in
-                        PRCard(pr: pr, store: store)
-                            .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.97)),
-                                                    removal: .opacity))
+                VStack(alignment: .leading, spacing: 8) {
+                    if !freshPRs.isEmpty {
+                        InsetList(items: freshPRs, dividerInset: 64) { pr in
+                            PRCard(pr: pr, store: store)
+                                .transition(.opacity)
+                        }
                     }
                     if !stalePRs.isEmpty {
                         staleDisclosure
                         if showStale {
-                            ForEach(stalePRs) { pr in PRCard(pr: pr, store: store) }
+                            InsetList(items: stalePRs, dividerInset: 64) { pr in
+                                PRCard(pr: pr, store: store)
+                            }
+                            .transition(.opacity)
                         }
                     }
                 }
-                .padding(12)
+                .padding(14)
                 .animation(.easeInOut(duration: 0.22), value: store.prs.map(\.id))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
+    /// Finder-sidebar–style section toggle.
     private var staleDisclosure: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.15)) { showStale.toggle() }
+            withAnimation(.easeInOut(duration: 0.18)) { showStale.toggle() }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "archivebox")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 20)
-                Text("Stale pull requests")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("\(stalePRs.count)")
-                    .font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Tokyo.surface(1), in: Capsule())
-                Spacer()
-                Text(showStale ? "Hide" : "Show")
-                    .font(.system(size: 11, weight: .semibold))
+            HStack(spacing: 6) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 10, weight: .semibold))
                     .rotationEffect(.degrees(showStale ? 90 : 0))
+                    .frame(width: 14)
+                Text("Stale")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(staleHovered ? Tokyo.fg : Tokyo.fgDim)
+                Text("\(stalePRs.count)")
+                    .font(.system(size: 12))
+                    .monospacedDigit()
+                Spacer()
+                Text("No activity in 14 days")
+                    .font(.system(size: 11))
             }
             .foregroundStyle(Tokyo.comment)
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 42)
-            .background(Tokyo.surface(staleHovered ? 1 : 0),
-                        in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .strokeBorder(Tokyo.stroke(staleHovered)))
+            .padding(.horizontal, 6)
+            .frame(maxWidth: .infinity, minHeight: 40)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -680,35 +802,36 @@ struct HUDView: View {
     @ViewBuilder private var mergedContent: some View {
         if store.merged.isEmpty && store.refreshing {
             ScrollView {
-                VStack(spacing: 8) { ForEach(0..<3, id: \.self) { _ in PRCardSkeleton() } }
-                    .padding(12)
+                InsetGroup {
+                    ForEach(0..<3, id: \.self) { i in
+                        if i > 0 { RowDivider(inset: 64) }
+                        PRCardSkeleton()
+                    }
+                }
+                .padding(14)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if store.merged.isEmpty {
             emptyState(icon: "tray", text: "No recent merges", sub: nil)
         } else {
             ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(store.merged) { m in MergedRow(pr: m) }
-                }
-                .padding(12)
+                InsetList(items: store.merged, dividerInset: 56) { m in MergedRow(pr: m) }
+                    .padding(14)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     private func emptyState(icon: String, text: String, sub: String?) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 22, weight: .medium))
+                .font(.system(size: 34, weight: .light))
                 .foregroundStyle(Tokyo.comment)
-                .frame(width: 48, height: 48)
-                .background(Tokyo.surface(0), in: Circle())
-                .overlay(Circle().strokeBorder(Tokyo.stroke()))
-            Text(text).font(.system(size: 13, weight: .semibold)).foregroundStyle(Tokyo.fgDim)
+                .padding(.bottom, 4)
+            Text(text).font(.system(size: 15, weight: .semibold)).foregroundStyle(Tokyo.fgDim)
             if let sub {
                 Text(sub)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundStyle(Tokyo.comment)
             }
         }
@@ -796,18 +919,18 @@ struct HUDView: View {
             }
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(vibecoders.leaderboardPeriod.profileLabel.uppercased())
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .kerning(1.1).foregroundStyle(Tokyo.comment)
+                    Text(vibecoders.leaderboardPeriod.profileLabel)
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Tokyo.comment)
                     Text(vcDuration(seconds))
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                         .foregroundStyle(Tokyo.magenta).monospacedDigit()
                 }
                 Rectangle().fill(Tokyo.line).frame(width: 1, height: 38)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("CREW RANK")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .kerning(1.1).foregroundStyle(Tokyo.comment)
+                    Text("Crew rank")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Tokyo.comment)
                     Text(entry.map { "#\($0.rank)" } ?? "—")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(Tokyo.cyan)
@@ -838,7 +961,7 @@ struct HUDView: View {
                     .font(.system(size: 10, weight: .medium)).foregroundStyle(Tokyo.orange)
             } else {
                 Text("Creates a 1200 × 630 PNG locally, then opens the macOS share sheet.")
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(Tokyo.comment)
             }
         }
@@ -875,8 +998,8 @@ struct HUDView: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Tokyo.yellow.opacity(0.13), in: Capsule())
                 Spacer()
-                Text("ACTIVE UNTIL STOPPED")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                Text("Active until stopped")
+                    .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(Tokyo.comment)
             }
             ScrollView(.horizontal, showsIndicators: false) {
@@ -894,7 +1017,7 @@ struct HUDView: View {
         .padding(11)
         .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Tokyo.stroke()))
+            .strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
     }
 
     private var onlineStrip: some View {
@@ -946,7 +1069,7 @@ struct HUDView: View {
         .padding(11)
         .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Tokyo.stroke()))
+            .strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
     }
 
     private var leaderboardBlock: some View {
@@ -967,8 +1090,9 @@ struct HUDView: View {
                     .font(.system(size: 11)).foregroundStyle(Tokyo.comment)
                     .frame(maxWidth: .infinity, alignment: .center).padding(.vertical, 18)
             } else {
-                VStack(spacing: 6) {
-                    ForEach(vibecoders.board.prefix(10), id: \.login) { e in
+                InsetGroup {
+                    ForEach(Array(vibecoders.board.prefix(10).enumerated()), id: \.element.login) { i, e in
+                        if i > 0 { RowDivider(inset: 76) }
                         CrewRow(entry: e) { vibecoders.showProfile(login: e.login) }
                     }
                 }
@@ -980,15 +1104,13 @@ struct HUDView: View {
         .padding(11)
         .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Tokyo.stroke()))
+            .strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
     }
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .bold))
-            .textCase(.uppercase)
-            .foregroundStyle(Tokyo.comment)
-            .kerning(1.2)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Tokyo.fgDim)
     }
 
     @ViewBuilder private var crewProfileContent: some View {
@@ -1062,7 +1184,7 @@ struct HUDView: View {
             }
             .padding(14)
             .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Tokyo.stroke()))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -1108,7 +1230,7 @@ struct HUDView: View {
             }
             .padding(14)
             .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Tokyo.stroke()))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
         }
         .padding(16)
         .background(Tokyo.bgDark.opacity(0.75), in: RoundedRectangle(cornerRadius: 14))
@@ -1119,7 +1241,7 @@ struct HUDView: View {
         HStack(spacing: 9) {
             Image(systemName: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokyo.magenta)
             VStack(alignment: .leading, spacing: 2) {
-                Text(label.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.comment)
+                Text(label).font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.comment)
                 Text(value).font(.system(size: 15, weight: .bold)).monospacedDigit()
             }
             Spacer(minLength: 0)
@@ -1176,7 +1298,7 @@ struct HUDView: View {
             Spacer(minLength: 8)
             TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                 Text(hudDuration(status.startedAt, ctx.date))
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Tokyo.yellow).monospacedDigit()
             }
             .fixedSize()
@@ -1212,7 +1334,7 @@ struct HUDView: View {
                     .font(.system(size: 12, weight: .bold)).monospacedDigit()
                     .foregroundStyle(Tokyo.magenta)
                 if sprint.active {
-                    Text("ACTIVE")
+                    Text("Active")
                         .font(.system(size: 8, weight: .bold)).foregroundStyle(Tokyo.green)
                 }
             }
@@ -1294,11 +1416,10 @@ struct SprintMap: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text(period == .month ? "DAILY ACTIVITY" : "HOURLY ACTIVITY")
+                Text(period == .month ? "Daily activity" : "Hourly activity")
                     .font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.comment)
-                    .kerning(0.8)
                 Spacer()
-                Text("CENTRAL TIME")
+                Text("Central Time")
                     .font(.system(size: 9, weight: .bold)).foregroundStyle(Tokyo.comment)
             }
             if period == .month {
@@ -1309,7 +1430,7 @@ struct SprintMap: View {
         }
         .padding(10)
         .background(Tokyo.bgDark.opacity(0.55), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Tokyo.stroke()))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
     }
 
     private var hourlyGrid: some View {
@@ -1699,8 +1820,8 @@ struct CrewStatusCard: View {
                 HStack(spacing: 4) {
                     Circle().fill(status.online ? Tokyo.green : Tokyo.comment)
                         .frame(width: 5, height: 5)
-                    Text(status.online ? "ONLINE" : "AWAY")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    Text(status.online ? "Online" : "Away")
+                        .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(Tokyo.fgDim)
                 }
                 .fixedSize()
@@ -1716,9 +1837,9 @@ struct CrewStatusCard: View {
                     Text(status.displayLabel)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(Tokyo.fg).lineLimit(2)
-                    Text("ACTIVITY RUNNING")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .kerning(0.7).foregroundStyle(accent)
+                    Text("Activity running")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(accent)
                 }
                 Spacer(minLength: 0)
             }
@@ -1726,7 +1847,7 @@ struct CrewStatusCard: View {
             HStack {
                 TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                     Label(hudDuration(status.startedAt, ctx.date), systemImage: "stopwatch")
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(accent).monospacedDigit()
                 }
                 Spacer(minLength: 4)
@@ -1773,8 +1894,8 @@ struct StatusesView: View {
                     Text("Activity history")
                     Text("\(store.history.count)").foregroundStyle(Tokyo.yellow)
                     Spacer()
-                    Text("LOCAL ONLY")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    Text("Local only")
+                        .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(Tokyo.comment)
                     Image(systemName: "chevron.right")
                         .rotationEffect(.degrees(showHistory ? 90 : 0))
@@ -1803,7 +1924,7 @@ struct StatusesView: View {
                                     .background(Tokyo.surface(0),
                                                 in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .strokeBorder(Tokyo.stroke()))
+                                        .strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
                             } else {
                                 StatusHistoryRow(session: session) {
                                     editingRename = session.message
@@ -1887,9 +2008,9 @@ struct StatusesView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Circle().fill(Tokyo.green).frame(width: 6, height: 6)
-                        Text("RUNNING")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .kerning(1).foregroundStyle(Tokyo.green)
+                        Text("Running")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Tokyo.green)
                     }
                     if renameTarget == session.id {
                         editRenameField(session)
@@ -1920,7 +2041,7 @@ struct StatusesView: View {
                 Spacer(minLength: 8)
                 TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                     Text(hudDuration(session.startedAt, ctx.date))
-                        .font(.system(size: 19, weight: .bold, design: .monospaced))
+                        .font(.system(size: 19, weight: .bold))
                         .monospacedDigit().foregroundStyle(accent)
                 }
                 .fixedSize()
@@ -2034,7 +2155,7 @@ struct StatusHistoryRow: View {
             Spacer(minLength: 8)
             if let endedAt = session.endedAt {
                 Text(hudDuration(session.startedAt, endedAt))
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .font(.system(size: 11, weight: .bold))
                     .monospacedDigit().foregroundStyle(Tokyo.yellow)
             }
             Button(action: onEdit) {
@@ -2050,7 +2171,7 @@ struct StatusHistoryRow: View {
         .frame(minHeight: 56)
         .background(Tokyo.surface(0), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(Tokyo.stroke()))
+            .strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
     }
 
     private func timeRange(to endedAt: Date) -> String {
@@ -2068,89 +2189,106 @@ struct PRCard: View {
     let pr: PR
     @ObservedObject var store: PRStore
     @State private var hovered = false
+    @State private var scoreHovered = false
     /// Merging is irreversible, so the button arms on the first click and only
     /// fires on the second (auto-disarming after a few seconds).
     @State private var mergeArmed = false
     @State private var disarmTask: Task<Void, Never>?
 
-    /// The one color that tells the whole story at a glance.
-    private var statusColor: Color { pr.reviewing ? Tokyo.blue : scoreColor }
-
     var body: some View {
         HStack(spacing: 12) {
-            Capsule().fill(statusColor).frame(width: 4, height: 42)
             scoreBlock
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(pr.title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
-                HStack(spacing: 7) {
+                HStack(spacing: 5) {
                     Text(pr.repo.split(separator: "/").last.map(String.init) ?? pr.repo)
-                        .font(.system(size: 11, weight: .medium)).foregroundStyle(Tokyo.fgDim).lineLimit(1)
-                    Text("#\(pr.number)")
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokyo.comment)
+                        .foregroundStyle(Tokyo.fgDim).lineLimit(1)
+                    Text("#\(pr.number)").foregroundStyle(Tokyo.comment)
                     if let rc = pr.reviewCount {
+                        Text("·").foregroundStyle(Tokyo.comment)
                         Text("\(rc) review\(rc == 1 ? "" : "s")")
-                            .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(Tokyo.comment)
                             .help("\(rc) Greptile review\(rc == 1 ? "" : "s")")
                     }
                     if pr.reviewing { reviewingPill }
                     if let why = pr.mergeBlockReason, !pr.reviewing { blockPill(why) }
                 }
+                .font(.system(size: 11))
                 HStack(spacing: 10) {
-                    freshnessLine
                     branchLine
+                    freshnessLine
                 }
             }
             Spacer(minLength: 8)
             if pr.canQuickMerge { mergeButton }
             rereviewButton
         }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(Tokyo.surface(hovered ? 1 : 0),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(borderColor, lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(hovered ? Tokyo.surface(1) : Color.clear)
+        .contentShape(Rectangle())
         .onTapGesture { openWebURL(pr.url) }
         .onHover { hovered = $0 }
         .help(pr.url)
         .onDisappear { disarmTask?.cancel() }
     }
 
-    private var borderColor: Color {
-        if pr.reviewing { return Tokyo.blue.opacity(0.38) }
-        if pr.canQuickMerge { return Tokyo.green.opacity(0.32) }
-        return Tokyo.stroke()
-    }
-
-    // Big, bold score — the primary thing your eye lands on.
-    private var scoreBlock: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(scoreColor.opacity(0.14))
-            if pr.hasScore {
-                HStack(alignment: .firstTextBaseline, spacing: 1) {
-                    Text("\(pr.scoreNum ?? 0)")
-                        .font(.system(size: 24, weight: .bold, design: .rounded)).foregroundStyle(scoreColor)
-                    Text("/\(pr.scoreDen ?? 5)")
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(scoreColor.opacity(0.72))
-                }
-            } else if pr.reviewing {
-                Spinner(size: 20, color: Tokyo.blue)
-            } else {
-                Text("—").font(.system(size: 22, weight: .bold)).foregroundStyle(Tokyo.comment)
+    // Activity-style ring: the score at a glance, the fill shows how close to perfect.
+    @ViewBuilder private var scoreBlock: some View {
+        if let n = pr.scoreNum, let d = pr.scoreDen, d > 0 {
+            ZStack {
+                ScoreRing(fraction: Double(n) / Double(d), color: scoreColor)
+                Text("\(n)")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(scoreColor)
             }
+            .help("Greptile confidence \(n)/\(d)")
+        } else if pr.reviewing || pr.triggering {
+            ZStack {
+                ScoreRing(fraction: 0, color: Tokyo.blue, dashed: true)
+                Spinner(size: 16, color: Tokyo.blue)
+            }
+            .help("Greptile is reviewing")
+        } else if pr.isDraft {
+            ZStack {
+                ScoreRing(fraction: 0, color: Tokyo.comment, dashed: true)
+                Image(systemName: "pencil")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Tokyo.comment)
+            }
+            .help("Draft — Greptile usually waits until it’s ready for review")
+        } else {
+            // Not reviewed yet: a ghost ring that doubles as "Ask Greptile".
+            Button {
+                Task { await store.triggerReview(pr) }
+            } label: {
+                ZStack {
+                    if scoreHovered {
+                        Circle().fill(Tokyo.magenta.opacity(0.16))
+                        Circle().strokeBorder(Tokyo.magenta.opacity(0.6), lineWidth: 1)
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Tokyo.magenta)
+                    } else {
+                        ScoreRing(fraction: 0, color: Tokyo.fgDim, dashed: true)
+                        Text("?")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Tokyo.fgDim)
+                    }
+                }
+                .frame(width: 40, height: 40)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .onHover { scoreHovered = $0 }
+            .help("Not reviewed yet — click to ask Greptile (posts “@greptile”)")
         }
-        .frame(width: 56, height: 48)
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(scoreColor.opacity(0.30)))
     }
 
     private var reviewingPill: some View {
         HStack(spacing: 5) {
-            Spinner(size: 10, color: Tokyo.blue)
+            Spinner(size: 9, color: Tokyo.blue)
             if let since = pr.reviewingSince {
                 TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                     Text(hudDuration(since, ctx.date))
@@ -2158,18 +2296,18 @@ struct PRCard: View {
                         .monospacedDigit()
                 }
             } else {
-                Text("reviewing").font(.system(size: 10, weight: .semibold)).foregroundStyle(Tokyo.blue)
+                Text("Reviewing").font(.system(size: 10, weight: .medium)).foregroundStyle(Tokyo.blue)
             }
         }
-        .padding(.horizontal, 7).padding(.vertical, 2)
+        .padding(.horizontal, 7).padding(.vertical, 1)
         .background(Tokyo.blue.opacity(0.14), in: Capsule())
     }
 
     private func blockPill(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .semibold))
+        Text(text.capitalized)
+            .font(.system(size: 10, weight: .medium))
             .foregroundStyle(Tokyo.orange)
-            .padding(.horizontal, 7).padding(.vertical, 2)
+            .padding(.horizontal, 7).padding(.vertical, 1)
             .background(Tokyo.orange.opacity(0.13), in: Capsule())
             .help("GitHub won’t merge this right now: \(text)")
     }
@@ -2209,13 +2347,13 @@ struct PRCard: View {
         HStack(spacing: 4) {
             Image(systemName: icon).font(.system(size: 8, weight: .bold))
             Text(name)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 10, weight: .semibold))
                 .lineLimit(1).truncationMode(.middle)
         }
         .foregroundStyle(color)
         .padding(.horizontal, 5).padding(.vertical, 1)
-        .background(fill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(stroke))
+        .background(fill, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(stroke, lineWidth: 0.5))
     }
 
     // Push/review recency — when the PR last got a commit and when Greptile last reviewed.
@@ -2265,13 +2403,14 @@ struct PRCard: View {
                         .font(.system(size: 11, weight: .bold))
                 }
                 Text(pr.merging ? "Merging" : (mergeArmed ? "Confirm" : "Merge"))
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 12, weight: .semibold))
             }
             .foregroundStyle(Tokyo.bgDark)
-            .padding(.horizontal, 11)
-            .frame(height: 34)
-            .background(mergeArmed ? Tokyo.orange : Tokyo.green,
-                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(mergeArmed ? Tokyo.orange : Tokyo.green, in: Capsule())
+            .shadow(color: Tokyo.bgDark.opacity(0.4), radius: 1.5, y: 1)
+            .frame(height: 36)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -2282,26 +2421,11 @@ struct PRCard: View {
     }
 
     private var rereviewButton: some View {
-        Button {
+        ToolbarIconButton(symbol: pr.triggering ? nil : "arrow.clockwise",
+                          help: "Re-trigger Greptile (posts “@greptile”)") {
             Task { await store.triggerReview(pr) }
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Tokyo.surface(1)).frame(width: 34, height: 34)
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(Tokyo.stroke()).frame(width: 34, height: 34)
-                if pr.triggering {
-                    Spinner(size: 16, color: Tokyo.fgDim)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Tokyo.fgDim)
-                }
-            }
         }
-        .buttonStyle(.plain)
         .disabled(pr.triggering)
-        .help("Re-trigger Greptile (posts “@greptile”)")
     }
 
     private var scoreColor: Color {
@@ -2319,89 +2443,154 @@ struct PRCard: View {
 
 struct RunsColumn: View {
     @ObservedObject var store: PRStore
+    /// The overlay is nonactivating; typing in search needs the app to take focus.
+    var onTextEditing: (Bool) -> Void = { _ in }
 
+    @State private var query = ""
+    @State private var expanded: Set<String> = []
+    @AppStorage("hud.actions.sort") private var sortRaw = RunSort.status.rawValue
+
+    private var sort: RunSort { RunSort(rawValue: sortRaw) ?? .status }
     private var runningCount: Int { store.runs.filter { $0.isRunning }.count }
     private var othersRunning: Int { store.runs.filter { $0.isRunning && !$0.isMine }.count }
 
-    private var stacks: [RunStack] { RunStack.stacks(from: store.runs) }
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
+    private var stacks: [RunStack] {
+        RunStack.stacks(from: store.runs.filter { RunStack.matches($0, query: trimmedQuery) }, sort: sort)
+    }
+
+    /// Search box + sort menu, Finder-toolbar style.
+    private var filterBar: some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Tokyo.comment)
+                HUDTextField(text: $query, placeholder: "Search workflows, jobs…",
+                             fontSize: 12, onEditing: onTextEditing)
+                    .frame(height: 18)
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Tokyo.comment)
+                            .frame(width: 18, height: 18)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear search")
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(Tokyo.bgDark.opacity(0.65), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(Tokyo.stroke(), lineWidth: 0.5))
+
+            Menu {
+                Picker("Sort by", selection: $sortRaw) {
+                    ForEach(RunSort.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .foregroundStyle(sort == .status ? Tokyo.fgDim : Tokyo.cyan)
+            .frame(width: 28, height: 28)
+            .background(sort == .status ? Color.clear : Tokyo.cyan.opacity(0.14),
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .fixedSize()
+            .help("Sort: \(sort.label)")
+        }
+    }
 
     /// Mine ↔ Everyone. Watching the whole queue is the point when you're stuck
     /// behind someone else's deploy.
     private var actorToggle: some View {
-        HStack(spacing: 3) {
-            toggleHalf("Mine", on: !store.showAllActors) { store.showAllActors = false }
-            toggleHalf(othersRunning > 0 && store.showAllActors ? "Queue · \(othersRunning)" : "Everyone",
-                       on: store.showAllActors) { store.showAllActors = true }
-        }
-        .padding(3)
-        .background(Tokyo.bgDark.opacity(0.8), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Tokyo.stroke()))
-    }
-
-    private func toggleHalf(_ label: String, on: Bool, _ act: @escaping () -> Void) -> some View {
-        Button(action: act) {
-            HStack(spacing: 5) {
-                // The switch triggers a fetch, so the side you picked says so.
-                if on && store.runsRefreshing { Spinner(size: 9, color: Tokyo.cyan) }
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1)
-            }
-                .foregroundStyle(on ? Tokyo.cyan : Tokyo.comment)
-                .frame(maxWidth: .infinity, minHeight: 26)
-                .background(on ? Tokyo.cyan.opacity(0.14) : .clear,
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(on ? "Showing \(label.lowercased())" : "Show \(label.lowercased())")
+        SegmentedControl<Bool>(
+            segments: [
+                .init(value: false, label: "Mine", busy: !store.showAllActors && store.runsRefreshing),
+                .init(value: true,
+                      label: othersRunning > 0 && store.showAllActors ? "Queue · \(othersRunning)" : "Everyone",
+                      busy: store.showAllActors && store.runsRefreshing),
+            ],
+            selection: store.showAllActors,
+            height: 28,
+            accent: { _ in Tokyo.cyan },
+            onSelect: { store.showAllActors = $0 }
+        )
+        .help(store.showAllActors ? "Showing everyone’s runs" : "Showing your runs")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
                 Image(systemName: "bolt.fill")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Tokyo.yellow)
-                    .frame(width: 28, height: 28)
-                    .background(Tokyo.yellow.opacity(0.13),
-                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                VStack(alignment: .leading, spacing: 1) {
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 0) {
                     Text(store.showAllActors ? "Actions" : "Your Actions")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1).fixedSize()
                     Text(store.showAllActors ? "Everyone’s workflows" : "Recent workflows")
-                        .font(.system(size: 9, weight: .medium)).foregroundStyle(Tokyo.comment)
+                        .font(.system(size: 10)).foregroundStyle(Tokyo.comment)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 if runningCount > 0 {
                     HStack(spacing: 5) {
                         Spinner(size: 9, color: Tokyo.blue)
-                        Text("\(runningCount)").font(.system(size: 11, weight: .bold)).foregroundStyle(Tokyo.blue)
+                        Text("\(runningCount)").font(.system(size: 11, weight: .medium)).foregroundStyle(Tokyo.blue)
                     }
-                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .padding(.horizontal, 8).padding(.vertical, 2)
                     .background(Tokyo.blue.opacity(0.16), in: Capsule())
                     .fixedSize()
                 }
             }
-            .padding(.horizontal, 13).padding(.top, 13).padding(.bottom, 9)
+            .padding(.horizontal, 14).padding(.top, 16).padding(.bottom, 10)
             actorToggle
-                .padding(.horizontal, 13).padding(.bottom, 11)
+                .padding(.horizontal, 12).padding(.bottom, 8)
+            filterBar
+                .padding(.horizontal, 12).padding(.bottom, 12)
             ZStack(alignment: .top) {
-                Rectangle().fill(Tokyo.line).frame(height: 1)
+                Rectangle().fill(Tokyo.line).frame(height: 0.5)
                 if store.runsRefreshing { IndeterminateBar() }
             }
             .frame(height: 1)
             ScrollView {
-                VStack(spacing: 8) {
+                Group {
                     if store.runsRefreshing && store.runs.isEmpty {
-                        ForEach(0..<3, id: \.self) { _ in RunRowSkeleton() }
+                        InsetGroup {
+                            ForEach(0..<3, id: \.self) { i in
+                                if i > 0 { RowDivider(inset: 33) }
+                                RunRowSkeleton()
+                            }
+                        }
+                    } else if stacks.isEmpty && !trimmedQuery.isEmpty {
+                        VStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 22, weight: .light))
+                            Text("No runs match “\(trimmedQuery)”")
+                                .font(.system(size: 12, weight: .medium))
+                                .multilineTextAlignment(.center)
+                        }
+                        .foregroundStyle(Tokyo.comment)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 28)
                     } else {
-                        ForEach(stacks) { st in
-                            RunRow(run: st.lead, stackCount: st.count, showActor: store.showAllActors)
-                                .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.97)),
-                                                        removal: .opacity))
+                        InsetList(items: stacks, dividerInset: 33) { st in
+                            RunRow(run: st.lead, stack: st, showActor: store.showAllActors,
+                                   expanded: expanded.contains(st.key)) {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    if expanded.contains(st.key) { expanded.remove(st.key) }
+                                    else { expanded.insert(st.key) }
+                                }
+                            }
+                            .transition(.opacity)
                         }
                     }
                 }
@@ -2410,35 +2599,43 @@ struct RunsColumn: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Tokyo.bgDark.opacity(0.5))
+        .background(Tokyo.bgDark.opacity(0.35))
     }
 }
 
 struct RunRow: View {
     let run: WorkflowRun
-    /// How many runs of this workflow are stacked into this row (1 = just one).
-    var stackCount: Int = 1
+    /// The stack this row leads, when runs of one workflow file were collapsed.
+    var stack: RunStack? = nil
     /// Show who owns the run — on in "Everyone" mode, where authorship is the point.
     var showActor: Bool = false
+    var expanded: Bool = false
+    var onToggleExpand: () -> Void = {}
     @State private var hovered = false
+
+    private var stackCount: Int { stack?.count ?? 1 }
+
+    /// The YAML file, when it adds something: hidden when it's already the row
+    /// title or just restates the workflow name ("CI" ↔ ci.yml).
+    private var shownFile: String? {
+        guard let file = run.workflowFile, !mixedNames else { return nil }
+        func squash(_ s: String) -> String { s.lowercased().filter { $0.isLetter || $0.isNumber } }
+        let stem = squash(file.replacingOccurrences(of: ".yaml", with: "").replacingOccurrences(of: ".yml", with: ""))
+        let name = squash(run.name)
+        if stem.isEmpty || name.contains(stem) || stem.contains(name) { return nil }
+        return file
+    }
+    private var mixedNames: Bool { stack?.hasMixedNames ?? false }
 
     private var showsChip: Bool { (showActor || !run.isMine) && run.actor != nil }
 
     var body: some View {
-        HStack(spacing: 9) {
-            Capsule().fill(color).frame(width: 3, height: 30)
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .top, spacing: 9) {
+            statusGlyph.frame(width: 14, height: 15)
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
-                    Text(run.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    if stackCount > 1 {
-                        Text("×\(stackCount)")
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
-                            .foregroundStyle(Tokyo.fgDim)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Tokyo.surface(2), in: Capsule())
-                            .fixedSize()
-                            .help("\(stackCount) runs of “\(run.name)” — showing the oldest")
-                    }
+                    Text(stack?.title ?? run.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    if stackCount > 1 { stackBadge }
                 }
                 if showsChip, let who = run.actor {
                     Text("@\(who)")
@@ -2448,44 +2645,73 @@ struct RunRow: View {
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background((run.isMine ? Tokyo.blue : Tokyo.yellow).opacity(0.13), in: Capsule())
                 }
-                if !run.title.isEmpty {
-                    Text(run.title).font(.system(size: 10)).foregroundStyle(Tokyo.comment).lineLimit(1)
+                // Collapsed by YAML file with differing run-names: the lead's own
+                // name is the useful subtitle; otherwise the commit/PR title.
+                let subtitle = mixedNames ? run.name : run.title
+                if !subtitle.isEmpty {
+                    Text(subtitle).font(.system(size: 10)).foregroundStyle(Tokyo.comment).lineLimit(1)
+                }
+                if let file = shownFile {
+                    Label(file, systemImage: "doc.text")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Tokyo.comment)
+                        .lineLimit(1).truncationMode(.tail)
                 }
                 if let step = run.stepLine { stepLine(step) }
-                HStack(spacing: 6) {
+                HStack(spacing: 4) {
                     stateBadge
                     Spacer(minLength: 4)
                     timer
                 }
+                if expanded, let stack { stackMembers(stack) }
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 9)
+        .padding(.horizontal, 10).padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tokyo.surface(hovered ? 1 : 0),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(Tokyo.stroke(), lineWidth: 1))
-        // Literal stack: the extra runs peek out from behind the lead card.
-        .background(alignment: .top) {
-            if stackCount > 1 {
-                VStack(spacing: 0) {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Tokyo.surface(0))
-                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Tokyo.stroke()))
-                        .padding(.horizontal, 5)
-                        .frame(height: 22)
-                    Spacer(minLength: 0)
-                }
-                .offset(y: 5)
-            }
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .background(hovered ? Tokyo.surface(1) : Color.clear)
+        .contentShape(Rectangle())
         .onTapGesture { openWebURL(run.url) }
         .onHover { hovered = $0 }
         .help(stackCount > 1
-              ? "\(stackCount) runs of “\(run.name)” — showing the oldest · \(run.branch) · \(run.event)"
-              : "\(run.branch) · \(run.event)")
+              ? "\(stackCount) runs of \(run.workflowFile ?? "“\(run.name)”") — showing the oldest · \(run.branch) · \(run.event)"
+              : [run.workflowFile, run.branch, run.event].compactMap { $0 }.joined(separator: " · "))
+    }
+
+    /// "⌄ 6" — how many runs of this workflow file are folded in; click to list them.
+    private var stackBadge: some View {
+        Button(action: onToggleExpand) {
+            HStack(spacing: 3) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 7, weight: .bold))
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                Text("\(stackCount)").monospacedDigit()
+            }
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(expanded ? Tokyo.cyan : Tokyo.fgDim)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(expanded ? Tokyo.cyan.opacity(0.15) : Tokyo.surface(2), in: Capsule())
+            .contentShape(Rectangle().inset(by: -7))   // bigger hit target than it looks
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help(expanded ? "Hide the stacked runs"
+                       : "\(stackCount) runs of \(run.workflowFile ?? "this workflow") — click to list them")
+    }
+
+    /// The other runs folded into this stack, newest last, each opening on click.
+    private func stackMembers(_ stack: RunStack) -> some View {
+        let rest = Array(stack.runs.dropFirst())
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(rest.prefix(8)) { r in
+                StackMemberRow(run: r)
+            }
+            if rest.count > 8 {
+                Text("and \(rest.count - 8) more")
+                    .font(.system(size: 10)).foregroundStyle(Tokyo.comment)
+                    .padding(.top, 3)
+            }
+        }
+        .padding(.top, 2)
     }
 
     /// Which step the run is chewing on (or died on), with a slim progress bar.
@@ -2540,25 +2766,67 @@ struct RunRow: View {
         }
     }
 
-    private var stateBadge: some View {
-        HStack(spacing: 4) {
-            if run.isRunning { Spinner(size: 9, color: color) }
-            else { Image(systemName: iconName).font(.system(size: 9, weight: .bold)) }
-            Text(label).font(.system(size: 11, weight: .semibold))
+
+    /// Leading status symbol, like a Mail/Xcode issue row.
+    @ViewBuilder private var statusGlyph: some View {
+        if run.isRunning {
+            Spinner(size: 12, color: color)
+        } else {
+            Image(systemName: iconName + ".circle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(color)
         }
-        .foregroundStyle(color)
+    }
+
+    private var stateBadge: some View {
+        Text(label.capitalized)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(color)
     }
 
     @ViewBuilder private var timer: some View {
         if run.isRunning, let start = run.startedAt {
             TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                 Text(hudDuration(start, ctx.date))
-                    .font(.system(size: 11, weight: .semibold)).monospacedDigit().foregroundStyle(Tokyo.fgDim)
+                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(Tokyo.fgDim)
             }
         } else if let start = run.startedAt, let end = run.updatedAt {
             Text(hudDuration(start, end))
-                .font(.system(size: 11, weight: .semibold)).monospacedDigit().foregroundStyle(Tokyo.comment)
+                .font(.system(size: 11)).monospacedDigit().foregroundStyle(Tokyo.comment)
         }
+    }
+}
+
+/// One folded-in run under an expanded stack: name, branch, elapsed. Opens on click.
+struct StackMemberRow: View {
+    let run: WorkflowRun
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Rectangle().fill(Tokyo.line).frame(width: 1, height: 16)
+            Text(run.name == run.title || run.title.isEmpty ? run.name : "\(run.name) — \(run.title)")
+                .font(.system(size: 10))
+                .foregroundStyle(hovered ? Tokyo.fg : Tokyo.fgDim)
+                .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 4)
+            if let start = run.startedAt {
+                if run.isRunning {
+                    TimelineView(.periodic(from: Date(), by: 1)) { ctx in
+                        Text(hudDuration(start, ctx.date))
+                    }
+                } else {
+                    Text("\(hudAgo(start)) ago")
+                }
+            }
+        }
+        .font(.system(size: 10)).monospacedDigit()
+        .foregroundStyle(Tokyo.comment)
+        .frame(minHeight: 24)
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .onTapGesture { openWebURL(run.url) }
+        .help([run.branch, run.actor.map { "@\($0)" }].compactMap { $0 }.joined(separator: " · "))
     }
 }
 
@@ -2600,13 +2868,12 @@ struct CrewRow: View {
                 }
                 Spacer(minLength: 6)
                 Text(vcDuration(entry.value))
-                    .font(.system(size: 13, weight: .bold)).monospacedDigit()
+                    .font(.system(size: 13, weight: .medium)).monospacedDigit()
                     .foregroundStyle(Tokyo.magenta)
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: 40)
-            .background(Tokyo.surface(hovered ? 1 : 0),
-                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(hovered ? Tokyo.surface(1) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -2623,32 +2890,32 @@ struct MergedRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Capsule().fill(Tokyo.magenta).frame(width: 4, height: 38)
             Image(systemName: "arrow.triangle.merge")
-                .font(.system(size: 14, weight: .semibold)).foregroundStyle(Tokyo.magenta)
-                .frame(width: 36, height: 36)
-                .background(Tokyo.magenta.opacity(0.12),
-                            in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            VStack(alignment: .leading, spacing: 5) {
-                Text(pr.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                HStack(spacing: 7) {
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Tokyo.magenta)
+                .frame(width: 32, height: 32)
+                .background(Tokyo.magenta.opacity(0.14), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(pr.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                HStack(spacing: 5) {
                     Text(pr.repo.split(separator: "/").last.map(String.init) ?? pr.repo)
-                        .font(.system(size: 11, weight: .medium)).foregroundStyle(Tokyo.fgDim).lineLimit(1)
-                    Text("#\(pr.number)").font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokyo.comment)
+                        .foregroundStyle(Tokyo.fgDim).lineLimit(1)
+                    Text("#\(pr.number)").foregroundStyle(Tokyo.comment)
                     if let m = pr.mergedAt {
-                        Text("Merged \(hudAgo(m)) ago")
-                            .font(.system(size: 10, weight: .medium)).foregroundStyle(Tokyo.comment)
+                        Text("·").foregroundStyle(Tokyo.comment)
+                        Text("Merged \(hudAgo(m)) ago").foregroundStyle(Tokyo.comment)
                     }
                 }
+                .font(.system(size: 11))
             }
             Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Tokyo.comment.opacity(hovered ? 1 : 0))
         }
-        .padding(.horizontal, 12).padding(.vertical, 11)
-        .background(Tokyo.surface(hovered ? 1 : 0),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Tokyo.stroke(), lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .frame(minHeight: 50)
+        .background(hovered ? Tokyo.surface(1) : Color.clear)
+        .contentShape(Rectangle())
         .onTapGesture { openWebURL(pr.url) }
         .onHover { hovered = $0 }
         .help(pr.url)

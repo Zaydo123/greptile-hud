@@ -45,6 +45,7 @@ private struct RunLine: Decodable {
     let started: String?
     let updated: String?
     let actor: String?
+    let path: String?
 }
 
 private struct CommentLine: Decodable {
@@ -145,7 +146,7 @@ enum GH {
     }
 
     private static let runsJQ = #"""
-.workflow_runs[] | {id: .id, name: .name, title: .display_title, branch: .head_branch, event: .event, url: .html_url, status: .status, conclusion: .conclusion, started: .run_started_at, updated: .updated_at, actor: (.triggering_actor.login // .actor.login)}
+.workflow_runs[] | {id: .id, name: .name, title: .display_title, branch: .head_branch, event: .event, url: .html_url, status: .status, conclusion: .conclusion, started: .run_started_at, updated: .updated_at, actor: (.triggering_actor.login // .actor.login), path: .path}
 """#
 
     /// Recent Actions runs in `repo`. Pass `actor` to see only that person's runs,
@@ -168,9 +169,18 @@ enum GH {
                 branch: r.branch ?? "", event: r.event ?? "", url: r.url,
                 status: r.status, conclusion: r.conclusion,
                 startedAt: parseISO(r.started), updatedAt: parseISO(r.updated),
-                actor: r.actor))
+                actor: r.actor, workflowFile: workflowFileName(r.path)))
         }
         return out
+    }
+
+    /// ".github/workflows/deploy.yml@main" → "deploy.yml". The YAML file is the
+    /// workflow's stable identity; `name` can be a per-run `run-name`.
+    static func workflowFileName(_ path: String?) -> String? {
+        guard var p = path?.trimmingCharacters(in: .whitespaces), !p.isEmpty else { return nil }
+        if let at = p.firstIndex(of: "@") { p = String(p[..<at]) }
+        let base = p.split(separator: "/").last.map(String.init) ?? p
+        return base.isEmpty ? nil : base
     }
 
     private static let pushedReposJQ = #"""

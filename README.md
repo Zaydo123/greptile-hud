@@ -78,9 +78,12 @@ When you have CI runs you kicked off — a **merge**, push, PR, or manual dispat
 | Cyan **↳ step · 8/14** + bar | Which step it's on right now, and how far through the job |
 | Red **⊘ step · 5/7** | For a failed run, the step it died on |
 | **@login** chip | Who owns the run — blue for yours, yellow for other people's. Always shown in **Everyone** mode, and on other people's runs in either mode |
-| **×3** badge | Repeat runs of the same workflow, stacked into one row |
+| **› 3** badge | Repeat runs of the same workflow file, stacked into one row — click to list them |
+| `deploy.yml` | The workflow's YAML file, next to the run state |
 | Green **success** / red **failure** + duration | Finished — shows how long it took (kept ~30 min) |
-| Tooltip | `job — step` on the step line, `branch · event` on the row |
+| Tooltip | `job — step` on the step line, `file · branch · event` on the row |
+| Search box | Filters by workflow/run name, job or step, YAML file, title, branch, repo, or actor. Every word must match |
+| **⇅** menu | Sort by **Status** (default), **Newest first**, **Oldest first**, or **Workflow name**. Sticks across launches |
 
 **Mine / Everyone toggle.** By default the column shows only runs you set off.
 Flip it to **Everyone** to watch the whole queue — useful when your deploy is
@@ -92,12 +95,16 @@ Step detail costs one extra API call per run, so it's only fetched for runs that
 are in flight or failed (capped at 10 per refresh, in-flight first).
 
 **Stacked duplicates.** Busy repos fire the same workflow over and over, one per
-push. Repeat runs of the same workflow *in the same state* collapse into a single
-row showing the **oldest** of the bunch — the one furthest along and nearest the
-front of the queue — badged `×3`, with the extras peeking out behind the card.
+push. Runs are matched by their **workflow YAML file** (e.g. `deploy.yml`), not
+their display name, so a workflow whose `run-name` changes every time (say
+`deploy:production:<sha>`) still counts as one workflow. Repeat runs of the same
+file *in the same state* collapse into a single row showing the **oldest** of the
+bunch — the one furthest along and nearest the front of the queue — badged `› 3`.
+When the stacked runs have different names, the row is titled by the YAML file.
+Click the badge to list every run in the stack, and click one to open it.
 Failures never merge into the running pile, so a red run can't hide inside a blue
-one. Rows sort in flight first, then failures, then successes; yours ahead of
-other people's within each.
+one. With the default **Status** sort, rows go in flight first, then failures,
+then successes; yours ahead of other people's within each.
 
 **While the HUD is open** it polls every 12 seconds instead of once a minute, so
 run state and steps stay live. Only the Actions column re-fetches on that
