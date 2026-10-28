@@ -83,8 +83,15 @@ struct WorkflowRun: Identifiable, Equatable {
     var currentStep: String? = nil
     var stepIndex: Int? = nil
     var stepTotal: Int? = nil
+    /// The workflow's YAML file, e.g. "deploy.yml". Runs of one file can carry
+    /// different `run-name`s (a SHA, an environment…), so this — not `name` —
+    /// is what says "these are the same workflow".
+    var workflowFile: String? = nil
 
     var isRunning: Bool { status != "completed" }
+
+    /// Identity for grouping: the YAML file when GitHub reported it, else the name.
+    var workflowKey: String { workflowFile ?? name }
 
     /// "Install deps · 8/14" — what the run is chewing on right now.
     var stepLine: String? {
@@ -94,51 +101,105 @@ struct WorkflowRun: Identifiable, Equatable {
     }
 }
 
+/// How the Actions column orders its rows. Persisted by raw value.
+enum RunSort: String, CaseIterable, Identifiable {
+    case status, newest, oldest, name
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .status: return "Status"
+        case .newest: return "Newest first"
+        case .oldest: return "Oldest first"
+        case .name:   return "Workflow name"
+        }
+    }
+}
+
 /// Several runs of the same workflow, collapsed into one row. Busy repos fire
 /// the same workflow over and over (one per push); the useful one is the oldest
 /// still in that state — it's furthest along and at the front of the queue.
 struct RunStack: Identifiable {
     let lead: WorkflowRun     // oldest run in the stack
-    let count: Int
-    /// The bucket (repo + workflow + state), not the lead run: when the lead
+    /// Every run in the stack, lead first (oldest → newest).
+    let runs: [WorkflowRun]
+    /// The bucket (repo + workflow file + state), not the lead run: when the lead
     /// finishes and the next run takes its place, the row stays put instead of
     /// animating out and back in.
     let key: String
     var id: String { key }
+    var count: Int { runs.count }
 
-    /// Collapse repeat runs of the same workflow in the same state into one row.
-    /// Each row shows the **oldest** of its bunch — the one furthest along, at
-    /// the front of the queue — and counts the rest. Failures never merge into
-    /// the running pile, so a red run can't hide inside a blue one.
+    /// True when the stacked runs don't share one `run-name` — e.g. a deploy
+    /// workflow titled by commit SHA — so the row should lead with the YAML file.
+    var hasMixedNames: Bool { Set(runs.map(\.name)).count > 1 }
+
+    /// What to call the row: the shared run name, or the YAML file when the
+    /// names differ.
+    var title: String {
+        hasMixedNames ? (lead.workflowFile ?? lead.name) : lead.name
+    }
+
+    /// Collapse repeat runs of the same workflow **file** in the same state into
+    /// one row. Each row shows the **oldest** of its bunch — the one furthest
+    /// along, at the front of the queue — and counts the rest. Failures never
+    /// merge into the running pile, so a red run can't hide inside a blue one.
     ///
-    /// Ordering: in-flight first (oldest first, since that's the one about to
-    /// clear), then yours before other people's, then finished runs newest first.
-    static func stacks(from runs: [WorkflowRun]) -> [RunStack] {
+    /// `.status` ordering: in-flight first (oldest first, since that's the one
+    /// about to clear), then yours before other people's, then finished runs
+    /// newest first. Every ordering ends on the unique bucket key.
+    static func stacks(from runs: [WorkflowRun], sort: RunSort = .status) -> [RunStack] {
         var buckets: [String: [WorkflowRun]] = [:]
         for r in runs {
             let state = r.isRunning ? "running" : (r.conclusion ?? "done")
-            buckets["\(r.repo)|\(r.name)|\(state)", default: []].append(r)
+            buckets["\(r.repo)|\(r.workflowKey)|\(state)", default: []].append(r)
         }
         // Every comparison ends on a unique key: dictionary order is random, so
         // an unbroken tie would shuffle rows between identical polls.
-        return buckets.compactMap { key, group -> RunStack? in
-            guard let lead = group.min(by: {
-                let a = $0.startedAt ?? .distantFuture, b = $1.startedAt ?? .distantFuture
-                return a != b ? a < b : $0.id < $1.id
-            }) else { return nil }
-            return RunStack(lead: lead, count: group.count, key: key)
+        let oldestFirst: (WorkflowRun, WorkflowRun) -> Bool = {
+            let a = $0.startedAt ?? .distantFuture, b = $1.startedAt ?? .distantFuture
+            return a != b ? a < b : $0.id < $1.id
         }
-        .sorted { a, b in
+        let stacks = buckets.compactMap { key, group -> RunStack? in
+            let ordered = group.sorted(by: oldestFirst)
+            guard let lead = ordered.first else { return nil }
+            return RunStack(lead: lead, runs: ordered, key: key)
+        }
+        return stacks.sorted { a, b in
             let x = a.lead, y = b.lead
-            if rank(x) != rank(y) { return rank(x) < rank(y) }
-            if x.isMine != y.isMine { return x.isMine }
-            let sx = x.startedAt, sy = y.startedAt
-            if sx != sy {
-                if x.isRunning { return (sx ?? .distantFuture) < (sy ?? .distantFuture) }
-                return (sx ?? .distantPast) > (sy ?? .distantPast)
+            switch sort {
+            case .status:
+                if rank(x) != rank(y) { return rank(x) < rank(y) }
+                if x.isMine != y.isMine { return x.isMine }
+                let sx = x.startedAt, sy = y.startedAt
+                if sx != sy {
+                    if x.isRunning { return (sx ?? .distantFuture) < (sy ?? .distantFuture) }
+                    return (sx ?? .distantPast) > (sy ?? .distantPast)
+                }
+            case .newest, .oldest:
+                // A stack is as new as its newest run.
+                let sx = a.runs.last?.startedAt ?? .distantPast
+                let sy = b.runs.last?.startedAt ?? .distantPast
+                if sx != sy { return sort == .newest ? sx > sy : sx < sy }
+            case .name:
+                let c = a.title.localizedCaseInsensitiveCompare(b.title)
+                if c != .orderedSame { return c == .orderedAscending }
+                if rank(x) != rank(y) { return rank(x) < rank(y) }
             }
             return a.key < b.key
         }
+    }
+
+    /// Search over everything a row can show: run and job names, the YAML file,
+    /// the commit/PR title, branch, repo, actor, and the current step. Every
+    /// whitespace-separated term must match somewhere (case-insensitive).
+    static func matches(_ r: WorkflowRun, query: String) -> Bool {
+        let terms = query.split(whereSeparator: \.isWhitespace)
+        guard !terms.isEmpty else { return true }
+        let hay = [r.name, r.workflowFile, r.title, r.branch, r.repo, r.actor,
+                   r.currentJob, r.currentStep, r.event]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+        return terms.allSatisfy { hay.localizedCaseInsensitiveContains($0) }
     }
 
     /// In flight first, then anything that broke, then the quiet successes.
