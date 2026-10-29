@@ -39,12 +39,13 @@ func displayName(login, name string) string {
 }
 
 type leaderboardEntry struct {
-	Rank     int        `json:"rank"`
-	Login    string     `json:"login"`
-	Name     string     `json:"name"`
-	Value    int64      `json:"value"`
-	Online   bool       `json:"online"`
-	LastSeen *time.Time `json:"last_seen"`
+	Rank      int        `json:"rank"`
+	Login     string     `json:"login"`
+	Name      string     `json:"name"`
+	Value     int64      `json:"value"`
+	Online    bool       `json:"online"`
+	LastSeen  *time.Time `json:"last_seen"`
+	AvatarURL *string    `json:"avatar_url"`
 }
 
 // handleLeaderboard returns the devtime leaderboard:
@@ -58,19 +59,21 @@ func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if period == periodAll {
 		rows, err = s.db.QueryContext(r.Context(), `
-			SELECT u.login, u.name, u.last_seen, COALESCE(SUM(d.seconds), 0) AS value
+			SELECT u.login, u.name, u.last_seen, COALESCE(SUM(d.seconds), 0) AS value, a.updated_at
 			FROM users u
+			LEFT JOIN avatars a ON a.user_id = u.id
 			LEFT JOIN devtime d ON d.user_id = u.id
-			GROUP BY u.id
+			GROUP BY u.id, a.updated_at
 			ORDER BY value DESC, u.login
 			LIMIT 100`)
 	} else {
 		rows, err = s.db.QueryContext(r.Context(), `
-			SELECT u.login, u.name, u.last_seen, COALESCE(SUM(d.seconds), 0) AS value
+			SELECT u.login, u.name, u.last_seen, COALESCE(SUM(d.seconds), 0) AS value, a.updated_at
 			FROM users u
+			LEFT JOIN avatars a ON a.user_id = u.id
 			LEFT JOIN devtime d ON d.user_id = u.id
 				AND d.day >= $1::date AND d.day < $2::date
-			GROUP BY u.id
+			GROUP BY u.id, a.updated_at
 			ORDER BY value DESC, u.login
 			LIMIT 100`, window.dateKey(), window.endDateKey())
 	}
@@ -85,11 +88,13 @@ func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var e leaderboardEntry
 		var name sql.NullString
-		if err := rows.Scan(&e.Login, &name, &e.LastSeen, &e.Value); err != nil {
+		var avatarAt sql.NullTime
+		if err := rows.Scan(&e.Login, &name, &e.LastSeen, &e.Value, &avatarAt); err != nil {
 			logf("leaderboard scan: %v", err)
 			continue
 		}
 		e.Name = displayName(e.Login, name.String)
+		e.AvatarURL = avatarURL(e.Login, avatarAt)
 		e.Rank = rank + 1
 		e.Online = isOnline(&User{LastSeen: e.LastSeen})
 		out = append(out, e)
@@ -111,11 +116,13 @@ func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleOnline(w http.ResponseWriter, r *http.Request) {
 	day := currentDayPeriod()
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT login, name, last_seen,
-			COALESCE((SELECT seconds FROM devtime WHERE user_id = users.id AND day = $1::date), 0)
-		FROM users
-		WHERE last_seen IS NOT NULL AND last_seen > now() - interval '5 minutes'
-		ORDER BY last_seen DESC`, day.dateKey())
+		SELECT u.login, u.name, u.last_seen,
+			COALESCE((SELECT seconds FROM devtime WHERE user_id = u.id AND day = $1::date), 0),
+			a.updated_at
+		FROM users u
+		LEFT JOIN avatars a ON a.user_id = u.id
+		WHERE u.last_seen IS NOT NULL AND u.last_seen > now() - interval '5 minutes'
+		ORDER BY u.last_seen DESC, u.login`, day.dateKey())
 	if err != nil {
 		logf("online: %v", err)
 		httpError(w, http.StatusInternalServerError, "online query failed")
@@ -127,15 +134,18 @@ func (s *server) handleOnline(w http.ResponseWriter, r *http.Request) {
 		Name         string    `json:"name"`
 		LastSeen     time.Time `json:"last_seen"`
 		DevtimeToday int64     `json:"devtime_today"`
+		AvatarURL    *string   `json:"avatar_url"`
 	}
 	var out []entry
 	for rows.Next() {
 		var e entry
 		var name sql.NullString
-		if err := rows.Scan(&e.Login, &name, &e.LastSeen, &e.DevtimeToday); err != nil {
+		var avatarAt sql.NullTime
+		if err := rows.Scan(&e.Login, &name, &e.LastSeen, &e.DevtimeToday, &avatarAt); err != nil {
 			continue
 		}
 		e.Name = displayName(e.Login, name.String)
+		e.AvatarURL = avatarURL(e.Login, avatarAt)
 		out = append(out, e)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"online": out})
@@ -181,6 +191,24 @@ func (s *server) handleUser(w http.ResponseWriter, r *http.Request) {
 		logf("user sprints: %v", err)
 		sprints = []Sprint{}
 	}
+	if u.AvatarURL, err = userAvatarURL(r.Context(), s.db, u); err != nil {
+		logf("user avatar: %v", err)
+	}
+	seriesWindow := dailySeriesWindow(now, selectedPeriod, selectedWindow)
+	byDay, err := devtimeByDay(r.Context(), s.db, u.ID, seriesWindow)
+	if err != nil {
+		logf("user daily devtime: %v", err)
+		byDay = map[string]int64{}
+	}
+	daily := denseDailySeries(seriesWindow, byDay)
+	activities := []activityTotal{}
+	if spans, err := activitySpans(r.Context(), s.db, u.ID, selectedPeriod, selectedWindow, now); err != nil {
+		logf("user activities: %v", err)
+	} else if selectedPeriod == periodAll {
+		activities = aggregateActivities(spans, time.Time{}, time.Time{}, now)
+	} else {
+		activities = aggregateActivities(spans, selectedWindow.Start, selectedWindow.End, now)
+	}
 	response := map[string]any{
 		"user":           u,
 		"devtime_today":  today,
@@ -189,6 +217,8 @@ func (s *server) handleUser(w http.ResponseWriter, r *http.Request) {
 		"period":         selectedPeriod,
 		"online":         isOnline(u),
 		"sprints":        sprints,
+		"daily":          daily,
+		"activities":     activities,
 	}
 	if selectedPeriod != periodAll {
 		addDayPeriod(response, selectedWindow)

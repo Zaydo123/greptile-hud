@@ -27,6 +27,10 @@ The app:
 - `Sources/GitHub.swift`: `gh` command runner, GitHub queries, and `PRStore`.
 - `Sources/Vibecoders.swift`: vibecoders store — devtime heartbeats, leaderboard
   and active-status fetches, and trust-based username handling (no OAuth, no tokens).
+- `Sources/Usage.swift`: app & site usage — the on-device catalog that maps
+  the frontmost app / browser tab to a fixed key (or `other`), and the sampler.
+- `Sources/CrewCharts.swift`: Crew visuals — cached profile photos
+  (`CrewAvatar`), usage breakdown bars, devtime-by-day columns, activity totals.
 - `Sources/Updater.swift`: GitHub Releases checking, validation, installation,
   and relaunch logic.
 - `backend/`: Go + Postgres "vibecoders" service (devtime leaderboard, active
@@ -169,25 +173,28 @@ clicked control looking idle while its request is in flight.
 
 ## Crew statuses
 
-- Status timing and completed history are owned by the local `StatusStore` and
-  persisted in UserDefaults. A running status must survive app relaunches.
-- Only the active emoji, message, and original start time are published through
-  Vibecoders. Never upload completed history or sync a status to GitHub.
+- Status timing and history are owned by the local `StatusStore` and persisted
+  in UserDefaults. A running status must survive app relaunches.
+- The active emoji, message, and start time are published as the live status;
+  completed sessions are stored server-side via `syncStatusHistory` (upsert by
+  session UUID, so it is idempotent) and merged back by id — local edits win.
+  Never sync a status to GitHub.
 - Shared statuses must remain visible after a user falls out of the five-minute
   online window; presence and an explicitly running status are separate states.
 - Queue active-status writes in order so a quick Start then Stop cannot leave a
   stale remote status behind.
 
-## Stats cards
+## App & site usage
 
-- Shareable stats cards are snapshots of the signed-in user's aggregate
-  Vibecoders data for the selected leaderboard period.
-- Render cards locally as 1200 × 630 PNG images and hand them to the native
-  macOS share sheet. Do not upload generated images or add server-side share
-  records.
-- Cards may contain the username, display name, selected-period devtime, Crew
-  rank, all-time devtime, sprint count, and period range. Never include status
-  history, repository data, or exact sprint timestamps.
+- Classification happens on the Mac (`UsageCatalog` in `Sources/Usage.swift`).
+  Only catalog keys and seconds are uploaded; anything off-catalog is `other`.
+  Never send app names, bundle ids, window titles, URLs, or hosts, and never
+  read window titles at all.
+- The Swift catalog keys and `backend/catalog.go` must stay identical — the
+  server folds unknown keys into `other`, so a key added on one side only is
+  silently lost. Add "major" apps/sites only; nothing private or niche.
+- No counting while idle (`UsageTracker.idleCutoff`), and the
+  "Share my app & site time" switch must stop both sampling and uploads.
 
 ## Stacked pull requests
 

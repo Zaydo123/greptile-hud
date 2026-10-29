@@ -109,3 +109,23 @@ func TestStatusMutationsWriteFullColumnSet(t *testing.T) {
 		t.Fatalf("statuses.go mentions status_emoji %d times, want 3 (SELECT + set + clear)", got)
 	}
 }
+
+// handleStatuses LEFT JOINs avatars for avatar_url: a LEFT JOIN so running
+// statuses without a photo still show, reading only updated_at (never the
+// image bytes), and ordered with a unique login tie-break so two statuses
+// started in the same instant can't swap places between polls.
+func TestStatusesFeedLeftJoinsAvatarsWithoutBytes(t *testing.T) {
+	src := statusSource(t)
+
+	const join = "LEFT JOIN avatars a ON a.user_id = u.id"
+	if got := strings.Count(src, join); got != 1 {
+		t.Fatalf("statuses.go contains %q %d times, want exactly 1 (the feed query)", join, got)
+	}
+	if strings.Contains(src, "a.data") {
+		t.Fatal("statuses.go selects avatar bytes (a.data); the feed must read only a.updated_at")
+	}
+	const order = "ORDER BY u.status_started_at DESC, u.login"
+	if got := strings.Count(src, order); got != 1 {
+		t.Fatalf("statuses.go contains %q %d times, want exactly 1", order, got)
+	}
+}

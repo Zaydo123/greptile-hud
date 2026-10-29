@@ -26,6 +26,8 @@
     <string>13.0</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Greptile HUD reads the active tab's address to tell which major site you're on (e.g. YouTube or GitHub). Only the site's category key is shared with your Crew — never the URL.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Greptile HUD</string>
 </dict>

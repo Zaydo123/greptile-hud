@@ -26,6 +26,7 @@ type crewStatus struct {
 	Message   string    `json:"message"`
 	StartedAt time.Time `json:"started_at"`
 	Online    bool      `json:"online"`
+	AvatarURL *string   `json:"avatar_url"`
 }
 
 type statusRequest struct {
@@ -121,8 +122,9 @@ func (s *server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleClearStatus removes only the shared active status. Completed interval
-// history never reaches the backend; it remains in the macOS app's UserDefaults.
+// handleClearStatus removes only the shared active status. Completed sessions
+// are uploaded separately (POST /api/status/history, see status_history.go);
+// clearing the live status never writes or deletes history.
 func (s *server) handleClearStatus(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		User string `json:"user"`
@@ -151,10 +153,12 @@ func (s *server) handleClearStatus(w http.ResponseWriter, r *http.Request) {
 // are away and therefore no longer appear in the five-minute online feed.
 func (s *server) handleStatuses(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT login, name, status_emoji, status_message, status_started_at, last_seen
-		FROM users
-		WHERE status_started_at IS NOT NULL
-		ORDER BY status_started_at DESC
+		SELECT u.login, u.name, u.status_emoji, u.status_message, u.status_started_at, u.last_seen,
+			a.updated_at
+		FROM users u
+		LEFT JOIN avatars a ON a.user_id = u.id
+		WHERE u.status_started_at IS NOT NULL
+		ORDER BY u.status_started_at DESC, u.login
 		LIMIT 100`)
 	if err != nil {
 		logf("statuses: %v", err)
@@ -167,9 +171,9 @@ func (s *server) handleStatuses(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var status crewStatus
 		var name, emoji, message sql.NullString
-		var lastSeen sql.NullTime
+		var lastSeen, avatarAt sql.NullTime
 		if err := rows.Scan(&status.Login, &name, &emoji, &message,
-			&status.StartedAt, &lastSeen); err != nil {
+			&status.StartedAt, &lastSeen, &avatarAt); err != nil {
 			logf("statuses scan: %v", err)
 			continue
 		}
@@ -177,6 +181,7 @@ func (s *server) handleStatuses(w http.ResponseWriter, r *http.Request) {
 		status.Emoji = emoji.String
 		status.Message = message.String
 		status.Online = statusOnline(lastSeen, time.Now())
+		status.AvatarURL = avatarURL(status.Login, avatarAt)
 		out = append(out, status)
 	}
 	if err := rows.Err(); err != nil {

@@ -86,6 +86,15 @@ func newMux(s *server) *http.ServeMux {
 	mux.HandleFunc("POST /api/status", s.handleSetStatus)
 	mux.HandleFunc("DELETE /api/status", s.handleClearStatus)
 	mux.HandleFunc("POST /api/pulse", s.handlePulse)
+	mux.HandleFunc("GET /api/avatar", s.handleGetAvatar)
+	mux.HandleFunc("PUT /api/avatar", s.handlePutAvatar)
+	mux.HandleFunc("DELETE /api/avatar", s.handleDeleteAvatar)
+	mux.HandleFunc("POST /api/usage", s.handlePostUsage)
+	mux.HandleFunc("GET /api/usage", s.handleGetUsage)
+	mux.HandleFunc("GET /api/usage/crew", s.handleGetCrewUsage)
+	mux.HandleFunc("GET /api/status/history", s.handleGetStatusHistory)
+	mux.HandleFunc("POST /api/status/history", s.handlePostStatusHistory)
+	mux.HandleFunc("DELETE /api/status/history", s.handleDeleteStatusHistory)
 
 	// Landing page (site/), embedded into the binary so goathud.com serves the
 	// marketing site and the API from one service.

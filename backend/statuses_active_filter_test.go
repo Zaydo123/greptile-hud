@@ -4,7 +4,8 @@ package main
 // (statuses.go). The Crew feed must list every explicitly running status —
 // including people who fell out of the five-minute online window — and must
 // never surface users who never set one. That contract lives entirely in the
-// inline WHERE clause `status_started_at IS NOT NULL`, so it can drift
+// inline WHERE clause `u.status_started_at IS NOT NULL` (the feed query aliases
+// users as u since it LEFT JOINs avatars), so it can drift
 // silently with no compiler error:
 //
 //   - a dropped filter would flood the feed with every user row ever created,
@@ -31,7 +32,9 @@ import (
 func TestStatusesFeedFiltersToActiveOnly(t *testing.T) {
 	src := statusSource(t)
 
-	const active = "WHERE status_started_at IS NOT NULL"
+	// users is aliased u because the feed LEFT JOINs avatars for avatar_url;
+	// the filter must still be on the users row's status column.
+	const active = "WHERE u.status_started_at IS NOT NULL"
 	if got := strings.Count(src, active); got != 1 {
 		t.Fatalf("statuses.go contains %q %d times, want exactly 1 (the handleStatuses feed filter)", active, got)
 	}

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import Foundation
 
@@ -14,7 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = PRStore()
     let vibecoders = VibecodersStore()
     let statuses = StatusStore()
+    private let usage = UsageTracker()
     private let updater = UpdateController()
+    private var historySync: AnyCancellable?
 
     private var panel: NSPanel!
     private var statusItem: NSStatusItem!
@@ -49,6 +52,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await store.refresh() }
         Task { await vibecoders.refresh() }
         vibecoders.publishStatus(statuses.active)
+        usage.start()
+        // Completed statuses go to the server shortly after they change
+        // (stop, rename, auto-stop), and once at launch to catch up.
+        historySync = statuses.$sessions
+            .map { $0.filter { !$0.isActive } }
+            .removeDuplicates()
+            .debounce(for: .seconds(2), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.vibecoders.syncStatusHistory(self.statuses)
+            }
         Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             await updater.checkForUpdates(userInitiated: false)
@@ -60,8 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await self?.store.refresh() }
         }
         vibecodersTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.vibecoders.heartbeatIfActive()
-            Task { await self?.vibecoders.refresh() }
+            guard let self else { return }
+            self.vibecoders.heartbeatIfActive()
+            self.vibecoders.flushUsage(self.usage)
+            Task { await self.vibecoders.refresh() }
         }
         // Auto-stop guard: end Focus when the user goes idle, and end ANY
         // activity that has run past the 8-hour cap. Runs on a short interval so
@@ -217,6 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if alert.runModal() == .alertFirstButtonReturn {
             vibecoders.setUsername(field.stringValue)
             vibecoders.publishStatus(statuses.active)
+            vibecoders.syncStatusHistory(statuses)
         }
     }
 

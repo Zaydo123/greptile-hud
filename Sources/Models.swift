@@ -269,8 +269,9 @@ struct StatusSession: Identifiable, Codable, Equatable {
     var requiresPresence: Bool { ActivityPreset(rawValue: emoji)?.requiresPresence ?? false }
 }
 
-/// Local-only status stopwatch and history. The whole value is small and is
-/// persisted in UserDefaults so a running status survives an app relaunch.
+/// Status stopwatch and history. Persisted in UserDefaults so a running status
+/// survives an app relaunch; completed sessions are also stored server-side
+/// (see `VibecodersStore.syncStatusHistory`) once the user has joined Crew.
 @MainActor
 final class StatusStore: ObservableObject {
     @Published private(set) var sessions: [StatusSession] = []
@@ -331,6 +332,16 @@ final class StatusStore: ObservableObject {
         sessions[index].endedAt = now
         save()
         return session.id
+    }
+
+    /// Add completed sessions recorded elsewhere (another Mac) that this one
+    /// doesn't have. Local edits win: an id we already know is left alone.
+    func mergeRemote(_ remote: [StatusSession]) {
+        let known = Set(sessions.map(\.id))
+        let fresh = remote.filter { !known.contains($0.id) && $0.endedAt != nil }
+        guard !fresh.isEmpty else { return }
+        sessions = (sessions + fresh).sorted { $0.startedAt > $1.startedAt }
+        save()
     }
 
     private func save() {
