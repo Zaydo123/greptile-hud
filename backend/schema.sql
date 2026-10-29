@@ -1,8 +1,12 @@
 -- Vibecoders (Greptile HUD backend) schema. Applied automatically at startup.
 --
 -- Identity is trust-based: a user is just a self-chosen username. There is no
--- OAuth, no API token, and no GitHub data. Devtime and explicitly started
--- active statuses are the only shared data; completed status history is local.
+-- OAuth, no API token, and no GitHub data. Shared data is: devtime, explicitly
+-- started active statuses, completed status history (stored server-side at the
+-- user's request so it follows them across Macs), optional user-uploaded
+-- profile photos, and app/site usage. Usage is only fixed catalog keys
+-- (e.g. "youtube", "other") plus seconds per crew day — never app names, URLs,
+-- or window titles.
 
 CREATE TABLE IF NOT EXISTS users (
     id         BIGSERIAL PRIMARY KEY,
@@ -67,3 +71,42 @@ ALTER TABLE users DROP COLUMN IF EXISTS github_id,
 
 DROP TABLE IF EXISTS github_stats;
 DROP TABLE IF EXISTS api_tokens;
+
+-- Optional profile photo, uploaded by the user. Validated server-side as a
+-- PNG or JPEG of bounded size and dimensions; one row per user. User-shaped
+-- API responses LEFT JOIN this table for updated_at only (never the bytes).
+CREATE TABLE IF NOT EXISTS avatars (
+    user_id      BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    content_type TEXT NOT NULL,
+    data         BYTEA NOT NULL,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- App/site usage per crew day. key is always a catalog key (catalog.go);
+-- anything else is folded into "other" before it reaches this table.
+CREATE TABLE IF NOT EXISTS app_usage (
+    user_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day      DATE NOT NULL,
+    key      TEXT NOT NULL,
+    seconds  BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, day, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_usage_day ON app_usage (day);
+
+-- Completed status sessions. client_id is the Mac app's own UUID for the
+-- session, so re-uploads (and renames) upsert instead of duplicating.
+CREATE TABLE IF NOT EXISTS status_history (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_id   UUID NOT NULL,
+    emoji       TEXT NOT NULL,
+    message     TEXT NOT NULL,
+    started_at  TIMESTAMPTZ NOT NULL,
+    ended_at    TIMESTAMPTZ NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, client_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_status_history_user_started
+    ON status_history (user_id, started_at DESC);

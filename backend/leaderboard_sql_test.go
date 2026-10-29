@@ -60,3 +60,29 @@ func TestLeaderboardWindowFilterMatchesPeriodSemantics(t *testing.T) {
 		t.Fatalf("leaderboard.go is missing the period window filter `%s`", filter)
 	}
 }
+
+// avatar_url comes from a LEFT JOIN on avatars in all three user-shaped
+// queries in leaderboard.go (both leaderboard queries and the online feed). It
+// must be a LEFT JOIN — an inner join would silently drop everyone without a
+// photo from the leaderboard — and must only read updated_at, never the image
+// bytes, or every poll would ship every photo through the database.
+func TestUserShapedQueriesLeftJoinAvatarsWithoutBytes(t *testing.T) {
+	src := leaderboardSource(t)
+
+	const join = "LEFT JOIN avatars a ON a.user_id = u.id"
+	if got := strings.Count(src, join); got != 3 {
+		t.Fatalf("leaderboard.go contains %q %d times, want 3 (all, period, online)", join, got)
+	}
+	if strings.Contains(src, "a.data") {
+		t.Fatal("leaderboard.go selects avatar bytes (a.data); user-shaped queries must read only a.updated_at")
+	}
+	// The leaderboard groups by user; the avatar version is functionally
+	// dependent on the user (avatars is keyed by user_id) and joins the GROUP BY.
+	if got := strings.Count(src, "GROUP BY u.id, a.updated_at"); got != 2 {
+		t.Fatalf("leaderboard.go GROUP BY u.id, a.updated_at appears %d times, want 2", got)
+	}
+	// Ordering must still end on the unique login tie-break.
+	if got := strings.Count(src, "ORDER BY value DESC, u.login"); got != 2 {
+		t.Fatalf("leaderboard.go ORDER BY value DESC, u.login appears %d times, want 2", got)
+	}
+}

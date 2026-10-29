@@ -138,13 +138,15 @@ inline (pencil icon on the running card or a history row) afterwards.
 Timers run until stopped, survive relaunches, and appear in the HUD footer and
 menu bar, where the eyes change to the active emoji.
 
-**Stop and save** records the exact start time, end time, and elapsed duration in
-the collapsible **Activity history** inside Crew. The menu-bar menu also shows the
+**Stop** records the exact start time, end time, and elapsed duration in
+the collapsible **History** row inside Crew. The menu-bar menu also shows the
 running status and can stop it without opening the HUD. Statuses are never sent
 to GitHub. If you have joined Vibecoders, the active emoji, activity label, and
 start time are shared with the Crew tab until you stop it—even after you leave the
-five-minute Online list. Completed history stays only in local UserDefaults and is
-never uploaded. Without a Crew username, the entire feature remains local.
+five-minute Online list. Completed statuses (emoji, label, start and end time) are
+also stored on the Vibecoders server, so your history follows you to another Mac
+and your profile can show time per activity and recent statuses. Without a Crew
+username, the entire feature stays local.
 
 ## Requirements
 
@@ -180,16 +182,21 @@ vibecoders integration with the `backend/` service:
   name shown on the leaderboard and we take your word for it (there's no
   authentication or code tracking at all; identity lives only in
   UserDefaults, cleared by "Forget username").
-- **Online now** — who's been active in the last 5 minutes, with today's
-  devtime.
+- **Online now** — avatars for who's been active in the last 5 minutes, with
+  today's devtime and their running status emoji. Click one for their profile.
 - **Crew statuses** — activity cards with preset accents, elapsed timers, and
   separate Online/Away indicators remain visible even while someone is away from
-  their keyboard; completed status history is never uploaded.
-- **Shareable stats cards** — choose Today, Week, Month, or All time and export
-  your latest devtime, Crew rank, all-time total, and sprint count in a two-column
-  flight-log layout as a polished 1200 × 630 PNG through the macOS share sheet.
-  The image is rendered locally.
-- **Leaderboard and profiles** — Today, Week, and Month activity with visible
+  their keyboard.
+- **Profile photos** — click your avatar in Crew ▸ Devtime to pick a photo
+  (right-click to remove). It's cropped to a square and shrunk to 256 px on
+  your Mac before upload, then shown everywhere your initials used to be.
+- **Where the time goes** — app & site time for the whole crew, by category and
+  by app, for the selected period; each profile has its own breakdown, a
+  devtime-by-day chart (Week / Month), and time per activity. See *App & site
+  tracking* below for exactly what's collected.
+- **Leaderboard and profiles** — one Today / Week / Month control drives your
+  stats row and the leaderboard (your row is highlighted; people with no devtime
+  in the period are hidden). Activity comes with visible
   Central Time date ranges, rankings, sprint maps, exact sprint rows, join dates, and
   last-online times. Hovering a sprint-map block shows its active duration and
   every overlapping sprint's exact boundaries. Data refreshes every minute.
@@ -208,6 +215,23 @@ vibecoders integration with the `backend/` service:
   defaults), and `VC_IDLE_CUTOFF` (stop beating after this many idle seconds,
   default 900, macOS only). A launchd agent example ships alongside it in
   `backend/client/launchd-example.plist`.
+
+### App & site tracking
+
+While you've joined Crew and **Share my app & site time** is on (Crew ▸ Where
+the time goes), the app checks every 5 seconds which app is in front — and, for
+Safari and Chromium browsers (Chrome, Arc, Brave, Edge, Dia, …), the active
+tab's address. That's matched **on your Mac** against a fixed list of about
+120 major apps and sites (`UsageCatalog` in `Sources/Usage.swift`: editors and
+terminals, GitHub, AWS, Claude/ChatGPT, Slack, X, YouTube, Netflix, Spotify,
+crew sites like kairos.trade, …). Anything not on the list is counted as
+**Other**. Only the list key and seconds are uploaded, about once a minute —
+never app names, window titles, URLs, or hosts. Nothing is counted while
+you've been idle for 2 minutes.
+
+The first time it reads a browser tab, macOS asks to let Greptile HUD control
+that browser. Saying no just files that browser's time under Other. Turn the
+switch off to stop tracking entirely.
 
 Menu-bar: Vibecoders ▸ Join the devtime leaderboard, Online now, Leaderboard,
 Refresh, Change username, Forget username.

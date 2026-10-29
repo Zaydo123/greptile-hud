@@ -42,6 +42,10 @@ type User struct {
 	LastSeen  *time.Time `json:"last_seen"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
+	// AvatarURL is the relative, cache-busted profile photo URL, or null when
+	// the user has none. It is not a users column (scanUser leaves it nil);
+	// handleUser fills it from the avatars table.
+	AvatarURL *string `json:"avatar_url"`
 }
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {

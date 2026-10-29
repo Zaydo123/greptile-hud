@@ -16,7 +16,8 @@ import (
 )
 
 // requiredTables lists, per table, the columns this package's queries read or
-// write (sourced from db.go, sprints.go, statuses.go, leaderboard.go). Add a
+// write (sourced from db.go, sprints.go, statuses.go, leaderboard.go, avatar.go,
+// usage.go, status_history.go, profile.go). Add a
 // column here when a new query starts touching it.
 var requiredTables = map[string][]string{
 	"users": {
@@ -24,8 +25,14 @@ var requiredTables = map[string][]string{
 		"created_at", "updated_at",
 		"status_emoji", "status_message", "status_started_at",
 	},
-	"devtime": {"user_id", "day", "seconds", "last_heartbeat_at"},
-	"sprints": {"user_id", "started_at", "last_active_at", "ended_at", "duration_seconds"},
+	"devtime":   {"user_id", "day", "seconds", "last_heartbeat_at"},
+	"sprints":   {"user_id", "started_at", "last_active_at", "ended_at", "duration_seconds"},
+	"avatars":   {"user_id", "content_type", "data", "updated_at"},
+	"app_usage": {"user_id", "day", "key", "seconds"},
+	"status_history": {
+		"id", "user_id", "client_id", "emoji", "message",
+		"started_at", "ended_at", "updated_at",
+	},
 }
 
 // schemaColumns parses schemaSQL into table -> set of declared columns. It
@@ -109,5 +116,20 @@ func TestSchemaSQLIsEmbedded(t *testing.T) {
 	// rather than ship a schema-less binary.
 	if !strings.Contains(schemaSQL, "CREATE TABLE IF NOT EXISTS users") {
 		t.Fatal("schemaSQL is empty or missing the users table — //go:embed may be broken")
+	}
+}
+
+// The upserts in avatar.go, usage.go and status_history.go name their ON
+// CONFLICT targets; Postgres rejects the statement unless a matching unique
+// constraint exists, so pin each one against the schema.
+func TestSchemaConflictTargetsExist(t *testing.T) {
+	for name, re := range map[string]*regexp.Regexp{
+		"avatars primary key on user_id":             regexp.MustCompile(`(?s)CREATE TABLE IF NOT EXISTS avatars \(\s*user_id\s+BIGINT PRIMARY KEY REFERENCES users\(id\) ON DELETE CASCADE`),
+		"app_usage primary key (user_id, day, key)":  regexp.MustCompile(`(?s)CREATE TABLE IF NOT EXISTS app_usage \(.*?PRIMARY KEY \(user_id, day, key\)`),
+		"status_history unique (user_id, client_id)": regexp.MustCompile(`(?s)CREATE TABLE IF NOT EXISTS status_history \(.*?UNIQUE \(user_id, client_id\)`),
+	} {
+		if !re.MatchString(schemaSQL) {
+			t.Errorf("schema.sql is missing the %s that an ON CONFLICT clause depends on", name)
+		}
 	}
 }
