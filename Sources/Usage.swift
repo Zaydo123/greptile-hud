@@ -241,7 +241,8 @@ final class UsageTracker {
         timer?.invalidate()
         lastSample = Date()
         timer = Timer.scheduledTimer(withTimeInterval: Self.sampleInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.sample() }
+            guard let tracker = self else { return }
+            Task { @MainActor in tracker.sample() }
         }
     }
 
