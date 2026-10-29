@@ -13,9 +13,67 @@ private func parseISO(_ s: String?) -> Date? {
     return isoFormatter.date(from: s)
 }
 
-enum GHError: Error { case failed(String) }
+enum GHError: Error {
+    case failed(String)
+    /// GitHub's anti-abuse limit tripped; every call is paused until this date.
+    case rateLimited(until: Date)
+}
+
+/// Process-wide guard for `gh` traffic: caps how many calls run at once and,
+/// after GitHub answers with a rate-limit error, pauses *every* call until the
+/// backoff expires — hammering through a secondary limit only extends it.
+actor GHGate {
+    static let shared = GHGate()
+
+    /// GitHub's secondary limit is mostly about concurrency and bursts.
+    private let maxConcurrent = 4
+    private var active = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    private(set) var pausedUntil: Date?
+    private var backoff: TimeInterval = 0
+
+    func acquire() async throws {
+        if let until = pausedUntil, until > Date() { throw GHError.rateLimited(until: until) }
+        if active < maxConcurrent { active += 1; return }
+        await withCheckedContinuation { waiters.append($0) }
+        // Woken by release(), which handed this slot over without decrementing.
+        if let until = pausedUntil, until > Date() {
+            release()
+            throw GHError.rateLimited(until: until)
+        }
+    }
+
+    func release() {
+        if waiters.isEmpty { active -= 1 } else { waiters.removeFirst().resume() }
+    }
+
+    /// 2 min, doubling to 15 min while GitHub keeps refusing.
+    func tripped() -> Date {
+        // Calls already in flight fail together; count that as one strike.
+        if let until = pausedUntil, until > Date() { return until }
+        backoff = min(max(backoff * 2, 120), 900)
+        let until = Date().addingTimeInterval(backoff)
+        pausedUntil = until
+        return until
+    }
+
+    func succeeded() {
+        backoff = 0
+        if let until = pausedUntil, until <= Date() { pausedUntil = nil }
+    }
+
+    static func isRateLimit(_ stderr: String) -> Bool {
+        let s = stderr.lowercased()
+        return s.contains("rate limit") || s.contains("abuse detection")
+    }
+}
 
 func friendly(_ error: Error) -> String {
+    if case let GHError.rateLimited(until) = error {
+        let mins = max(1, Int((until.timeIntervalSinceNow / 60).rounded(.up)))
+        return "GitHub asked us to slow down — pausing updates for \(mins) min. Showing the last data."
+    }
     if case let GHError.failed(msg) = error {
         return msg.split(separator: "\n").first.map(String.init) ?? msg
     }
@@ -73,8 +131,25 @@ enum GH {
         return envFallback   // last resort: run "gh" off PATH
     }()
 
-    /// Run `gh <args>` and return stdout. Throws GHError.failed(stderr) on non-zero exit.
+    /// Run `gh <args>` and return stdout. Throws GHError.failed(stderr) on non-zero
+    /// exit, or GHError.rateLimited while GitHub's backoff is in force.
     static func run(_ args: [String]) async throws -> Data {
+        try await GHGate.shared.acquire()
+        do {
+            let data = try await spawn(args)
+            await GHGate.shared.release()
+            await GHGate.shared.succeeded()
+            return data
+        } catch GHError.failed(let msg) where GHGate.isRateLimit(msg) {
+            await GHGate.shared.release()
+            throw GHError.rateLimited(until: await GHGate.shared.tripped())
+        } catch {
+            await GHGate.shared.release()
+            throw error
+        }
+    }
+
+    private static func spawn(_ args: [String]) async throws -> Data {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 let proc = Process()
@@ -212,12 +287,13 @@ enum GH {
 """#
 
     /// Enrich a PR with its latest Greptile score and live re-review status.
-    static func enrich(_ input: PR) async -> PR {
+    /// nil means the comments fetch failed, so the caller can keep what it had.
+    static func enrich(_ input: PR) async -> PR? {
         var pr = input
         guard let data = try? await run([
             "api", "repos/\(pr.repo)/issues/\(pr.number)/comments", "--paginate", "--jq", commentsJQ
         ]), let text = String(data: data, encoding: .utf8) else {
-            return pr
+            return nil
         }
 
         // Re-tagging @greptile sometimes spawns a *second* review comment instead of
@@ -749,6 +825,18 @@ final class PRStore: ObservableObject {
 
     private var inFlight = false
     private var runsInFlight = false
+    /// When each PR's details were last fetched successfully.
+    private var enrichedAt: [String: Date] = [:]
+    private var lastMergedFetch: Date?
+
+    /// Re-fetch a PR's score/head state only when it moved, is mid-review, or
+    /// the copy we have is old — every 5 min, or 30 for PRs idle two weeks.
+    private func needsEnrich(fresh: PR, old: PR) -> Bool {
+        guard let at = enrichedAt[fresh.id] else { return true }
+        if fresh.updatedAt != old.updatedAt || old.reviewing || old.triggering { return true }
+        let idle = Date().timeIntervalSince(fresh.updatedAt ?? .distantPast) > 14 * 86400
+        return Date().timeIntervalSince(at) > (idle ? 1800 : 300)
+    }
     /// Bumped per Actions fetch so a slow, older fetch can't overwrite a newer one
     /// (e.g. a background poll landing after a Mine/Everyone switch).
     private var runsGeneration = 0
@@ -764,28 +852,53 @@ final class PRStore: ObservableObject {
 
         do {
             let base = try await GH.fetchOpenPRs()
+            // Only re-fetch PRs that could have changed: each enrich is 2–3 API
+            // calls, and re-reading a dozen idle PRs every minute is what trips
+            // GitHub's secondary rate limit.
+            let previous = Dictionary(prs.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             var enriched: [PR] = []
-            // Throttle to a small window so we don't fire every PR's requests at once and
-            // trip GitHub's secondary (anti-abuse) rate limit — which 403s the score fetches.
-            let maxConcurrent = 6
-            await withTaskGroup(of: PR.self) { group in
-                var it = base.makeIterator()
-                for _ in 0..<maxConcurrent { if let pr = it.next() { group.addTask { await GH.enrich(pr) } } }
-                while let p = await group.next() {
-                    enriched.append(p)
-                    if let pr = it.next() { group.addTask { await GH.enrich(pr) } }
+            var toFetch: [PR] = []
+            for pr in base {
+                if let old = previous[pr.id], !needsEnrich(fresh: pr, old: old) {
+                    enriched.append(old)
+                } else {
+                    toFetch.append(pr)
                 }
             }
+            // GHGate caps concurrency app-wide; this just keeps the queue short.
+            let maxConcurrent = 4
+            await withTaskGroup(of: (PR, PR?).self) { group in
+                var it = toFetch.makeIterator()
+                for _ in 0..<maxConcurrent { if let pr = it.next() { group.addTask { (pr, await GH.enrich(pr)) } } }
+                while let (pr, result) = await group.next() {
+                    if let result {
+                        enrichedAt[pr.id] = Date()
+                        enriched.append(result)
+                    } else {
+                        // Fetch failed: keep the last good version rather than a bare row.
+                        enriched.append(previous[pr.id] ?? pr)
+                    }
+                    if let next = it.next() { group.addTask { (next, await GH.enrich(next)) } }
+                }
+            }
+            let live = Set(base.map(\.id))
+            enrichedAt = enrichedAt.filter { live.contains($0.key) }
             enriched.sort { a, b in
                 if a.reviewing != b.reviewing { return a.reviewing && !b.reviewing }
                 return (a.updatedAt ?? .distantPast) > (b.updatedAt ?? .distantPast)
             }
             self.prs = enriched
             // Drop train picks whose PR closed or merged out from under us.
-            let live = Set(enriched.map(\.id))
             self.trainSelection = self.trainSelection.intersection(live)
             self.lastRefresh = Date()
-            self.merged = (try? await GH.fetchMergedPRs()) ?? self.merged
+            // Merges change rarely; a second search per minute isn't worth it.
+            if force || lastMergedFetch.map({ Date().timeIntervalSince($0) > 300 }) ?? true
+                || !previous.keys.allSatisfy(live.contains) {
+                if let m = try? await GH.fetchMergedPRs() {
+                    self.merged = m
+                    lastMergedFetch = Date()
+                }
+            }
             await syncTrains()
             await refreshRuns(for: enriched)
         } catch {
@@ -867,8 +980,9 @@ final class PRStore: ObservableObject {
         // Show the list immediately, then fill in "what step is it on" for the runs
         // where that's meaningful — in flight, or failed and worth explaining.
         publishRuns(kept, generation: generation, allActors: allActors)
+        // A finished failure's step never changes, so look it up once.
         let detailIdx = kept.indices
-            .filter { kept[$0].isRunning || kept[$0].conclusion == "failure" }
+            .filter { kept[$0].isRunning || (kept[$0].conclusion == "failure" && kept[$0].currentStep == nil) }
             .prefix(10)
         guard !detailIdx.isEmpty else { return }
         await withTaskGroup(of: (Int, WorkflowRun).self) { group in

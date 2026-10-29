@@ -244,14 +244,25 @@ Updates…**. Because updates are published to GitHub Releases, checking,
 downloading, and installing needs no app server.
 
 When an update is available the prompt shows the version range you're moving
-between and the release's "What's new" notes. Choose **Install Update** and the
+between and the release's "What's new" notes as short bullets. **Later** keeps
+background checks from asking again for a day, and **Skip This Version** stops
+them asking about that release at all. Either way the update stays one click
+away: the menu shows **Install Update x.y.z…** and the HUD footer shows an
+**Update x.y.z** pill. While it downloads, the pill and menu show progress.
+Choose **Install Update** and the
 app downloads the release from GitHub (retrying transient failures with a
 short backoff), verifies its SHA-256 checksum plus the bundle's identity,
 version, and code signature, replaces itself safely, and relaunches. After the
 swap it confirms the new build actually comes up — if it doesn't, it rolls
 back to the previous version and relaunches that instead, so a bad release
 can't leave you without a HUD. There is no zip extraction or manual app
-swapping.
+swapping. If the app can't replace itself — it's running straight from the disk
+image or a quarantined download, or its folder isn't writable — it says so
+before downloading and offers the release page instead.
+
+> Versions before 1.1.33 had a bug that made every update check report "up to
+> date". If you're on one of those, install the latest DMG once by hand; from
+> then on updates arrive in-app.
 
 First-time installs don't rely on the updater: each release also publishes
 `GreptileHUD.dmg`, a drag-to-Applications installer disk image. Download it
@@ -294,7 +305,8 @@ That's the only setup. After that, just hold Right Shift anywhere.
 - **Show HUD (pinned)** — keep the overlay open so you can click around without
   holding Shift (Esc or the ✕ closes it)
 - **Refresh now** — force a resync (it also auto-refreshes every 60s and on every peek)
-- **Check for Updates…** — check immediately; background checks also run every six hours
+- **Check for Updates…** — check immediately; background checks also run every six hours.
+  When an update is waiting this reads **Install Update x.y.z…** (or shows download progress)
 - **About Greptile HUD…** — current version, a link to the repo, and signing status
 - **Quit**
 

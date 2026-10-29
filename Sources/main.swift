@@ -117,7 +117,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.removeAllItems()
         let show = NSMenuItem(title: "Show HUD (pinned)", action: #selector(togglePinned), keyEquivalent: "")
         let refresh = NSMenuItem(title: "Refresh now", action: #selector(refreshNow), keyEquivalent: "r")
-        let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        let updates: NSMenuItem
+        switch updater.phase {
+        case .downloading(let p):
+            updates = NSMenuItem(title: "Downloading Update… \(Int(p * 100))%", action: nil, keyEquivalent: "")
+        case .installing:
+            updates = NSMenuItem(title: "Installing Update…", action: nil, keyEquivalent: "")
+        case .idle:
+            if let next = updater.available {
+                updates = NSMenuItem(title: "Install Update \(next.version)…", action: #selector(installUpdate), keyEquivalent: "")
+            } else {
+                updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+            }
+        }
         let reset = NSMenuItem(title: "Reset Position & Size", action: #selector(resetPanelFrame), keyEquivalent: "")
         [show, refresh, updates, reset].forEach { $0.target = self }
         menu.addItem(show)
@@ -262,7 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.delegate = self
 
         let host = NSHostingView(rootView: HUDView(store: store, vibecoders: vibecoders,
-                                                  statuses: statuses, hud: hudState, onClose: { [weak self] in
+                                                  statuses: statuses, hud: hudState, updater: updater, onClose: { [weak self] in
             self?.dismissOverlay()
         }, onTextEditing: { [weak self] editing in
             self?.textFieldEditing = editing
@@ -373,7 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// second to second. Stops the moment the overlay goes away.
     private func startLiveRefresh() {
         guard liveTimer == nil else { return }
-        liveTimer = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { [weak self] _ in
+        liveTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
             Task { await self?.store.refreshLive() }
         }
     }
@@ -498,11 +510,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await updater.checkForUpdates(userInitiated: true) }
     }
 
+    @objc private func installUpdate() {
+        Task { await updater.presentAvailable() }
+    }
+
     @objc private func showAbout() {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let a = NSAlert()
         a.messageText = "Greptile HUD"
-        a.informativeText = "Greptile HUD \\(version)\n\nA menu-bar overlay for your pull requests, review trains, and devtime crew.\n\nzaydo123/greptile-hud · ad-hoc signed"
+        a.informativeText = "Greptile HUD \(version)\n\nA menu-bar overlay for your pull requests, review trains, and devtime crew.\n\nzaydo123/greptile-hud · ad-hoc signed"
         a.addButton(withTitle: "Visit GitHub")
         a.addButton(withTitle: "OK")
         if a.runModal() == .alertFirstButtonReturn {

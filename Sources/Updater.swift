@@ -5,10 +5,37 @@ import Foundation
 /// A small GitHub Releases updater. Releases are published by `.github/workflows/release.yml`,
 /// so checking, downloading, and installing updates does not require an app server.
 @MainActor
-final class UpdateController {
+final class UpdateController: ObservableObject {
     private let repository = "Zaydo123/greptile-hud"
     private let archiveName = "GreptileHUD.zip"
     private var checking = false
+
+    /// A newer release we know about but haven't installed — the menu and the
+    /// HUD footer offer it until it's installed or skipped.
+    struct Available: Equatable {
+        let version: String
+        let notes: String
+        let pageURL: URL
+    }
+
+    enum Phase: Equatable {
+        case idle
+        case downloading(Double)   // 0…1
+        case installing
+    }
+
+    @Published private(set) var available: Available?
+    @Published private(set) var phase: Phase = .idle
+    private var pendingRelease: Release?
+
+    private static let skippedKey = "updater.skippedVersion"
+    private static let snoozeKey = "updater.snoozed"   // "<version>|<unix time>"
+    /// "Later" keeps automatic checks from re-prompting for the same version this long.
+    private static let snoozeInterval: TimeInterval = 24 * 3600
+
+    var currentVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    }
 
     private struct Release: Decodable {
         let tagName: String
@@ -27,24 +54,28 @@ final class UpdateController {
     private struct Asset: Decodable {
         let name: String
         let downloadURL: URL
+        let size: Int?
 
         enum CodingKeys: String, CodingKey {
             case name
             case downloadURL = "browser_download_url"
+            case size
         }
     }
 
     func checkForUpdates(userInitiated: Bool) async {
-        guard !checking else { return }
+        guard !checking, phase == .idle else { return }
         checking = true
         defer { checking = false }
 
         do {
             let release = try await latestRelease()
-            let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-            let available = normalizedVersion(release.tagName)
+            let current = currentVersion
+            let version = normalizedVersion(release.tagName)
 
-            guard current.compare(available, options: .numeric) == .orderedAscending else {
+            guard current.compare(version, options: .numeric) == .orderedAscending else {
+                available = nil
+                pendingRelease = nil
                 if userInitiated {
                     showAlert(title: "Greptile HUD is up to date",
                               message: "You’re running the latest version (\(current)).")
@@ -52,22 +83,15 @@ final class UpdateController {
                 return
             }
 
-            let response = showUpdatePrompt(current: current, version: available,
-                                            notes: release.body)
-            switch response {
-            case .alertFirstButtonReturn:
-                do {
-                    try await downloadAndInstall(release: release, version: available)
-                } catch {
-                    // The prompt makes this a user-visible install even when the check was
-                    // automatic, so installation failures should never disappear silently.
-                    showAlert(title: "Couldn’t install the update", message: error.localizedDescription)
-                }
-            case .alertThirdButtonReturn:
-                NSWorkspace.shared.open(release.htmlURL)
-            default:
-                break
-            }
+            pendingRelease = release
+            available = Available(version: version,
+                                  notes: whatIsNew(release.body ?? ""),
+                                  pageURL: release.htmlURL)
+
+            // Background checks stay quiet for a skipped or recently snoozed
+            // version; the menu item and HUD footer still offer it.
+            if !userInitiated && (isSkipped(version) || isSnoozed(version)) { return }
+            await presentAvailable()
         } catch {
             if userInitiated {
                 if case UpdateError.noReleases = error {
@@ -81,8 +105,67 @@ final class UpdateController {
         }
     }
 
+    /// Show the prompt for the known update (menu item / HUD footer click).
+    func presentAvailable() async {
+        guard phase == .idle, let release = pendingRelease, let info = available else { return }
+        switch showUpdatePrompt(current: currentVersion, version: info.version, notes: info.notes) {
+        case .alertFirstButtonReturn:
+            await install(release: release, version: info.version)
+        case .alertThirdButtonReturn:
+            UserDefaults.standard.set(info.version, forKey: Self.skippedKey)
+        default:
+            UserDefaults.standard.set("\(info.version)|\(Int(Date().timeIntervalSince1970))",
+                                      forKey: Self.snoozeKey)
+        }
+    }
+
+    private func install(release: Release, version: String) async {
+        do {
+            try preflightInstallLocation()
+            try await downloadAndInstall(release: release, version: version)
+        } catch {
+            phase = .idle
+            // The prompt makes this a user-visible install even when the check was
+            // automatic, so installation failures should never disappear silently.
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "Couldn’t install the update"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "Download Manually")
+            alert.addButton(withTitle: "Cancel")
+            if runAboveHUD(alert) == .alertFirstButtonReturn { NSWorkspace.shared.open(release.htmlURL) }
+        }
+    }
+
+    private func isSkipped(_ version: String) -> Bool {
+        UserDefaults.standard.string(forKey: Self.skippedKey) == version
+    }
+
+    private func isSnoozed(_ version: String) -> Bool {
+        guard let raw = UserDefaults.standard.string(forKey: Self.snoozeKey) else { return false }
+        let parts = raw.split(separator: "|")
+        guard parts.count == 2, String(parts[0]) == version, let t = TimeInterval(parts[1]) else { return false }
+        return Date().timeIntervalSince1970 - t < Self.snoozeInterval
+    }
+
+    /// Fail before downloading anything if this copy can't replace itself.
+    private func preflightInstallLocation() throws {
+        let bundle = Bundle.main.bundleURL.standardizedFileURL
+        guard bundle.pathExtension == "app" else { throw UpdateError.notRunningFromApp }
+        // Gatekeeper's App Translocation runs quarantined apps from a read-only
+        // random path; a mounted DMG is read-only too.
+        let readOnly = (try? bundle.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly ?? false
+        if bundle.path.contains("/AppTranslocation/") || readOnly {
+            throw UpdateError.needsMoveToApplications
+        }
+        let parent = bundle.deletingLastPathComponent().path
+        guard FileManager.default.isWritableFile(atPath: parent) else {
+            throw UpdateError.folderNotWritable(parent)
+        }
+    }
+
     private func latestRelease() async throws -> Release {
-        guard let url = URL(string: "https://api.github.com/repos/\\(repository)/releases/latest") else {
+        guard let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest") else {
             throw UpdateError.invalidRelease
         }
         var request = URLRequest(url: url)
@@ -102,13 +185,15 @@ final class UpdateController {
             throw UpdateError.missingAssets
         }
 
-        let archiveData = try await downloadWithRetry(archive.downloadURL)
-        let checksumData = try await downloadWithRetry(checksum.downloadURL)
+        phase = .downloading(0)
+        let checksumData = try await downloadWithRetry(checksum.downloadURL, expectedSize: nil)
+        let archiveData = try await downloadWithRetry(archive.downloadURL, expectedSize: archive.size)
         guard let expected = String(data: checksumData, encoding: .utf8)?
             .split(whereSeparator: { $0.isWhitespace }).first.map(String.init),
               expected.caseInsensitiveCompare(sha256(archiveData)) == .orderedSame else {
             throw UpdateError.checksumMismatch
         }
+        phase = .installing
 
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("GreptileHUD-update-\(UUID().uuidString)", isDirectory: true)
@@ -127,13 +212,34 @@ final class UpdateController {
         }
     }
 
-    private func download(_ url: URL) async throws -> Data {
+    /// Fetch a release asset. When `expectedSize` is given, report progress
+    /// through `phase` as the bytes arrive.
+    private func download(_ url: URL, expectedSize: Int?) async throws -> Data {
         guard url.scheme == "https", url.host?.lowercased() == "github.com",
-              url.path.hasPrefix("/\\(repository)/releases/download/") else {
+              url.path.hasPrefix("/\(repository)/releases/download/") else {
             throw UpdateError.invalidRelease
         }
-        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let expectedSize, expectedSize > 0 else {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            try validateHTTP(response)
+            return data
+        }
+        let (bytes, response) = try await URLSession.shared.bytes(from: url)
         try validateHTTP(response)
+        var data = Data()
+        data.reserveCapacity(expectedSize)
+        var buffer = [UInt8]()
+        buffer.reserveCapacity(64 * 1024)
+        for try await byte in bytes {
+            buffer.append(byte)
+            if buffer.count == 64 * 1024 {
+                data.append(contentsOf: buffer)
+                buffer.removeAll(keepingCapacity: true)
+                phase = .downloading(min(1, Double(data.count) / Double(expectedSize)))
+            }
+        }
+        data.append(contentsOf: buffer)
+        phase = .downloading(1)
         return data
     }
 
@@ -141,10 +247,10 @@ final class UpdateController {
     /// blip, so retry twice with a short backoff before surfacing a failure.
     /// The SHA-256 check still runs on every successful fetch, so a partial
     /// retry can't slip a corrupt archive through.
-    private func downloadWithRetry(_ url: URL) async throws -> Data {
+    private func downloadWithRetry(_ url: URL, expectedSize: Int?) async throws -> Data {
         for attempt in 1..<4 {
             do {
-                return try await download(url)
+                return try await download(url, expectedSize: expectedSize)
             } catch {
                 if attempt < 3 {
                     try? await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000)
@@ -246,32 +352,40 @@ final class UpdateController {
         String(value.drop(while: { $0 == "v" || $0 == "V" }))
     }
 
-    private func showUpdatePrompt(current: String, version: String, notes: String?) -> NSApplication.ModalResponse {
+    private func showUpdatePrompt(current: String, version: String, notes: String) -> NSApplication.ModalResponse {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "Greptile HUD \\(version) is available"
-        var info = "You’re on \\(current). The update is downloaded from GitHub Releases, verified against its SHA-256 checksum and the bundle’s identity, version, and signature, then installed and the app reopens."
-        if let n = notes, !n.isEmpty {
-            let clean = whatIsNew(n)
-            if !clean.isEmpty {
-                info += "\n\nWhat’s new:\n\\(clean)"
-            }
-        }
+        alert.messageText = "Greptile HUD \(version) is available"
+        var info = "You’re on \(current)."
+        if !notes.isEmpty { info += "\n\nWhat’s new:\n\(notes)" }
+        info += "\n\nThe update is verified (SHA-256 and code signature) before it replaces this copy, then the app reopens."
         alert.informativeText = info
         alert.addButton(withTitle: "Install Update")
         alert.addButton(withTitle: "Later")
-        alert.addButton(withTitle: "View on GitHub")
-        return alert.runModal()
+        alert.addButton(withTitle: "Skip This Version")
+        return runAboveHUD(alert)
     }
 
-    /// Release notes are GitHub Markdown — collapse to non-empty lines and cap
-    /// the length so the prompt stays readable.
+    /// GitHub's generated notes ("* feat: x by @user in https://…/pull/71",
+    /// headings, a Full Changelog link) become short bullets: "• feat: x (#71)".
     private func whatIsNew(_ body: String) -> String {
-        let clean = body.split(separator: "\n")
-            .map { String($0).trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
-        return clean.count > 600 ? String(clean.prefix(600)) : clean
+        var lines: [String] = []
+        for raw in body.split(separator: "\n") {
+            var line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") || line.lowercased().contains("full changelog")
+                || line.lowercased().hasPrefix("**new contributors") { continue }
+            if line.hasPrefix("* ") || line.hasPrefix("- ") { line = String(line.dropFirst(2)) }
+            if let r = line.range(of: #" by @[^ ]+ in https://github\.com/[^ ]+/pull/(\d+)$"#,
+                                  options: .regularExpression) {
+                let pr = line[r].split(separator: "/").last.map(String.init) ?? ""
+                line = String(line[..<r.lowerBound]) + (pr.isEmpty ? "" : " (#\(pr))")
+            }
+            line = line.replacingOccurrences(of: "**", with: "")
+            lines.append("• " + line)
+            if lines.count == 8 { break }
+        }
+        let clean = lines.joined(separator: "\n")
+        return clean.count > 600 ? String(clean.prefix(600)) + "…" : clean
     }
 
     private func showAlert(title: String, message: String) {
@@ -280,7 +394,15 @@ final class UpdateController {
         alert.messageText = title
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
-        alert.runModal()
+        runAboveHUD(alert)
+    }
+
+    /// The HUD panel floats at screen-saver level; a default-level alert would
+    /// open behind a pinned HUD.
+    @discardableResult
+    private func runAboveHUD(_ alert: NSAlert) -> NSApplication.ModalResponse {
+        alert.window.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+        return alert.runModal()
     }
 }
 
@@ -291,6 +413,8 @@ private enum UpdateError: LocalizedError {
     case badResponse
     case invalidApplication
     case notRunningFromApp
+    case needsMoveToApplications
+    case folderNotWritable(String)
     case noReleases
     case downloadFailed
     case commandFailed(String)
@@ -303,6 +427,10 @@ private enum UpdateError: LocalizedError {
         case .badResponse: return "GitHub returned an unexpected response."
         case .invalidApplication: return "The downloaded app failed identity, version, or code-signing validation."
         case .notRunningFromApp: return "Updates can only be installed when Greptile HUD is launched from GreptileHUD.app."
+        case .needsMoveToApplications:
+            return "Greptile HUD is running from a read-only location (the disk image or a quarantined download). Drag it into Applications, open it from there, and update again."
+        case .folderNotWritable(let folder):
+            return "Greptile HUD can’t replace itself in \(folder) — that folder isn’t writable by your account."
         case .noReleases: return "No release has been published for this repository yet."
         case .downloadFailed: return "Couldn’t download the update from GitHub after several attempts."
         case .commandFailed(let detail): return detail.isEmpty ? "The update helper failed." : detail

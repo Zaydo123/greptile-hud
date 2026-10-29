@@ -164,6 +164,15 @@ repo fetch keeps that repo's previous runs, and `runs` is only reassigned when
 it changed. Background polls are silent — the sweep bar and toggle spinner are
 for the user-initiated Mine/Everyone switch.
 
+## GitHub rate limits
+
+Every `gh` call goes through `GH.run`, which is gated by `GHGate`: at most 4
+calls in flight app-wide, and after a rate-limit error *all* calls pause
+(2 min, doubling to 15) instead of retrying into GitHub's secondary limit. Don't
+spawn `gh` around it. `PRStore.refresh` only re-enriches PRs that changed, are
+mid-review, or are older than 5 min (30 for idle ones); a failed enrich keeps
+the last good copy. The pinned live tick is 20s.
+
 ## Loading states
 
 Anything that fetches on click must say so in place: skeleton rows for a first
@@ -293,6 +302,15 @@ The updater must continue to:
 
 Automatic checks should stay quiet when there is no update or a background check
 cannot reach GitHub. User-initiated checks should report their result.
+
+Background checks must not nag: a skipped version (**Skip This Version**) is
+never prompted automatically, and **Later** snoozes that version for 24 hours.
+A known update stays reachable from the menu item and the HUD footer pill,
+which also show download progress (`UpdateController.phase`). Check that the
+app can replace itself (not translocated, not on a read-only volume, writable
+folder) before downloading. Updater alerts run above the screen-saver-level
+HUD panel. Watch string interpolation in this file — a stray `\\(` once
+shipped a URL that 404'd and made every check report "up to date".
 
 ## Versions, tags, and releases
 
