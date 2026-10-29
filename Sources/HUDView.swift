@@ -439,6 +439,7 @@ struct HUDView: View {
     @ObservedObject var vibecoders: VibecodersStore
     @ObservedObject var statuses: StatusStore
     @ObservedObject var hud: HUDState = HUDState()
+    @ObservedObject var updater: UpdateController
     var onClose: () -> Void = {}
     /// Fired when an editable text field gains/loses focus: the overlay is a
     /// nonactivating panel, so the app must activate itself to take typing,
@@ -679,6 +680,7 @@ struct HUDView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 6)
+            updatePill
             TimelineView(.periodic(from: Date(), by: 1)) { ctx in
                 Text("Up \(hudDuration(HUDClock.launchedAt, ctx.date))")
                     .font(.system(size: 10, weight: .medium))
@@ -691,6 +693,47 @@ struct HUDView: View {
         .frame(height: 24)
         .background(Tokyo.bgDark.opacity(0.35))
         .overlay(Rectangle().fill(Tokyo.line).frame(height: 0.5), alignment: .top)
+    }
+
+    /// A known update waits here (and in the menu) instead of nagging; while it
+    /// installs, this is where the progress shows.
+    @ViewBuilder private var updatePill: some View {
+        switch updater.phase {
+        case .downloading(let p):
+            HStack(spacing: 5) {
+                Spinner(size: 9, color: Tokyo.cyan)
+                Text("Updating \(Int(p * 100))%").monospacedDigit()
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Tokyo.cyan)
+            .fixedSize()
+        case .installing:
+            HStack(spacing: 5) {
+                Spinner(size: 9, color: Tokyo.cyan)
+                Text("Installing…")
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Tokyo.cyan)
+            .fixedSize()
+        case .idle:
+            if let next = updater.available {
+                Button { Task { await updater.presentAvailable() } } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text("Update \(next.version)")
+                    }
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Tokyo.green)
+                    .padding(.horizontal, 7).frame(height: 18)
+                    .background(Tokyo.green.opacity(0.14), in: Capsule())
+                    .frame(height: 24)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help("Greptile HUD \(next.version) is available — click for what’s new")
+            }
+        }
     }
 
     @ViewBuilder private var content: some View {
