@@ -17,7 +17,7 @@ import (
 
 // requiredTables lists, per table, the columns this package's queries read or
 // write (sourced from db.go, sprints.go, statuses.go, leaderboard.go, avatar.go,
-// usage.go, status_history.go, profile.go). Add a
+// usage.go, status_history.go, profile.go, banners.go). Add a
 // column here when a new query starts touching it.
 var requiredTables = map[string][]string{
 	"users": {
@@ -32,6 +32,10 @@ var requiredTables = map[string][]string{
 	"status_history": {
 		"id", "user_id", "client_id", "emoji", "message",
 		"started_at", "ended_at", "updated_at",
+	},
+	"banners": {
+		"id", "author_id", "to_login", "emoji", "message",
+		"created_at", "expires_at",
 	},
 }
 

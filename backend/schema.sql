@@ -110,3 +110,21 @@ CREATE TABLE IF NOT EXISTS status_history (
 
 CREATE INDEX IF NOT EXISTS idx_status_history_user_started
     ON status_history (user_id, started_at DESC);
+
+-- Crew banners: short, time-boxed shout-outs ("🎂 Happy birthday!") shown
+-- across the top of every crew member's HUD until they expire. to_login is
+-- free text (normalised like any login) rather than a foreign key, so you can
+-- celebrate someone who hasn't joined yet; reads LEFT JOIN users for the
+-- recipient's display name and photo.
+CREATE TABLE IF NOT EXISTS banners (
+    id          BIGSERIAL PRIMARY KEY,
+    author_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    to_login    TEXT,
+    emoji       TEXT NOT NULL,
+    message     TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_banners_expires ON banners (expires_at DESC);
+CREATE INDEX IF NOT EXISTS idx_banners_author ON banners (author_id, expires_at);

@@ -50,6 +50,9 @@ No auth headers anywhere — the username identifies the user.
 | POST   | `/api/status/history`                  | upsert completed status sessions              |
 | GET    | `/api/status/history?login=name&limit=100` | completed sessions, newest first          |
 | DELETE | `/api/status/history`                  | delete one completed session                  |
+| GET    | `/api/banners`                         | live crew banners, newest first (max 20)      |
+| POST   | `/api/banner`                          | post a shout-out banner                       |
+| DELETE | `/api/banner`                          | remove a banner (author or recipient)         |
 
 `POST /api/status` accepts `user`, `emoji`, `message`, and `started_at`.
 `DELETE /api/status` accepts `user`. At least an emoji or message is required
@@ -99,6 +102,19 @@ more than 5 minutes in the future are skipped; the response reports
 invalid. `DELETE /api/status/history` takes `{"user", "id"}`.
 `GET /api/status/history?login=&limit=` (1–500, default 100) lists sessions
 newest first; ids come back lowercased.
+
+### Crew banners
+
+Short, time-boxed shout-outs ("🎂 Happy birthday!") shown on every crew HUD.
+`POST /api/banner` takes `{"user", "to", "emoji", "message", "hours"}`:
+`message` is required (≤ 120 characters), `emoji` is optional (≤ 32 bytes), `to`
+is an optional recipient login (blank = the whole crew; it need not have joined
+yet), and `hours` defaults to 24 and is clamped to 1–72. An author can have at
+most 3 live banners — a fourth gets `429` until one expires or is removed.
+`GET /api/banners` lists unexpired banners with the author, the recipient's
+canonical login, display name and `to_avatar_url`. `DELETE /api/banner` takes
+`{"user", "id"}` and succeeds only for the banner's author or recipient
+(case-insensitive); otherwise `404`.
 
 ### Profile detail
 

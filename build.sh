@@ -37,6 +37,7 @@ SOURCES=(
     "$ROOT/Sources/Vibecoders.swift"
     "$ROOT/Sources/Usage.swift"
     "$ROOT/Sources/CrewCharts.swift"
+    "$ROOT/Sources/Banners.swift"
     "$ROOT/Sources/HUDView.swift"
     "$ROOT/Sources/main.swift"
 )
