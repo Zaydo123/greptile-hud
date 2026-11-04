@@ -160,6 +160,66 @@ struct VCCrewStatus: Codable, Equatable, Identifiable {
     }
 }
 
+/// A crew banner: a short, time-boxed shout-out ("🎂 Happy birthday!") shown
+/// across the top of every crew member's HUD until it expires. `to` is nil for
+/// a crew-wide banner.
+struct VCBanner: Codable, Equatable, Identifiable {
+    var id: Int64
+    var author: String
+    var authorName: String?
+    var to: String?
+    var toName: String?
+    var toAvatarUrl: String?
+    var emoji: String
+    var message: String
+    var createdAt: Date
+    var expiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, author, to, emoji, message
+        case authorName = "author_name"
+        case toName = "to_name"
+        case toAvatarUrl = "to_avatar_url"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+    }
+}
+
+/// One-click banner starters. The message carries no name — the banner shows
+/// its recipient separately — so a preset reads right with or without one.
+enum BannerPreset: String, CaseIterable, Identifiable {
+    case birthday = "🎂"
+    case congrats = "🎉"
+    case shipped = "🚀"
+    case welcome = "👋"
+    case thanks = "🙌"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .birthday: return "Birthday"
+        case .congrats: return "Congrats"
+        case .shipped: return "Shipped"
+        case .welcome: return "Welcome"
+        case .thanks: return "Thanks"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .birthday: return "Happy birthday!"
+        case .congrats: return "Congratulations!"
+        case .shipped: return "Shipped it — huge!"
+        case .welcome: return "Welcome to the crew!"
+        case .thanks: return "Thank you!"
+        }
+    }
+
+    /// Mirrors the server's `bannerMessageLimit` (backend/banners.go).
+    static let messageLimit = 120
+}
+
 struct VCLeaderboardEntry: Codable, Equatable {
     var rank: Int
     var login: String
@@ -262,12 +322,19 @@ final class VibecodersStore: NSObject, ObservableObject {
     @Published private(set) var crewUsage: VCUsageReport?
     @Published private(set) var avatarBusy = false
     @Published private(set) var avatarError: String?
+    @Published private(set) var banners: [VCBanner] = []
+    @Published private(set) var bannerPosting = false
+    @Published private(set) var bannerError: String?
+    /// Banners hidden on this Mac only (✕ on the strip). Removing a banner for
+    /// everyone is a separate, server-side action for its author or recipient.
+    @Published private(set) var dismissedBannerIDs: Set<Int64> = VibecodersStore.loadDismissedBanners()
     @Published var usageSharing: Bool = UsageTracker.isEnabled {
         didSet { UsageTracker.isEnabled = usageSharing }
     }
     @Published var errorText: String?
 
     private static let usernameKey = "vibecoders.username"
+    private static let dismissedBannersKey = "vibecoders.dismissedBanners"
     private var statusSyncTask: Task<Void, Never>?
     private var statusSyncRevision = 0
 
@@ -433,6 +500,7 @@ final class VibecodersStore: NSObject, ObservableObject {
             let onl: OnlineResp = try await get("/api/online")
             online = onl.online
             await refreshStatuses()
+            await refreshBanners()
             await refreshLeaderboard()
             await refreshCrewUsage()
             lastRefresh = Date()
@@ -667,6 +735,107 @@ final class VibecodersStore: NSObject, ObservableObject {
         }
     }
 
+    // MARK: Crew banners
+
+    /// Live banners this Mac hasn't dismissed: ones addressed to you first
+    /// (it's your birthday — you shouldn't have to page to find it), then the
+    /// server's newest-first order.
+    var visibleBanners: [VCBanner] {
+        let live = banners.filter { !dismissedBannerIDs.contains($0.id) }
+        return live.filter { isMe($0.to) } + live.filter { !isMe($0.to) }
+    }
+
+    /// Banners you posted that are still live (the server caps these at 3).
+    var myBanners: [VCBanner] { banners.filter { isMe($0.author) } }
+
+    func isMe(_ login: String?) -> Bool {
+        guard let login, hasUsername else { return false }
+        return login.caseInsensitiveCompare(username) == .orderedSame
+    }
+
+    /// The author or the recipient may take a banner down for everyone.
+    func canRemove(_ banner: VCBanner) -> Bool { isMe(banner.author) || isMe(banner.to) }
+
+    private static func loadDismissedBanners() -> Set<Int64> {
+        let raw = UserDefaults.standard.array(forKey: dismissedBannersKey) as? [NSNumber] ?? []
+        return Set(raw.map(\.int64Value))
+    }
+
+    private func saveDismissedBanners() {
+        UserDefaults.standard.set(dismissedBannerIDs.map { NSNumber(value: $0) },
+                                  forKey: Self.dismissedBannersKey)
+    }
+
+    private func refreshBanners() async {
+        do {
+            let response: BannersResp = try await get("/api/banners")
+            banners = response.banners
+            // Forget dismissals for banners that have expired or been removed,
+            // so the set can't grow forever.
+            let live = Set(response.banners.map(\.id))
+            let pruned = dismissedBannerIDs.intersection(live)
+            if pruned != dismissedBannerIDs {
+                dismissedBannerIDs = pruned
+                saveDismissedBanners()
+            }
+        } catch VCError.notFound {
+            // Backend not yet deployed with banners — the feature just stays dark.
+            banners = []
+        } catch {
+            // Optional feed: keep the last good banners rather than flashing empty.
+        }
+    }
+
+    /// Posts a banner; returns true on success so the composer can reset.
+    @discardableResult
+    func postBanner(to recipient: String, emoji: String, message: String) async -> Bool {
+        guard hasUsername else { return false }
+        let to = recipient.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !to.isEmpty && Self.normalizeUsername(to) == nil {
+            bannerError = "That recipient isn’t a valid username"
+            return false
+        }
+        bannerPosting = true
+        bannerError = nil
+        defer { bannerPosting = false }
+        do {
+            let payload = BannerWriteRequest(user: username,
+                                             to: Self.normalizeUsername(to) ?? "",
+                                             emoji: emoji, message: message)
+            _ = try await send("/api/banner", method: "POST",
+                               json: JSONEncoder().encode(payload), serverMessage: true)
+            await refreshBanners()
+            return true
+        } catch {
+            bannerError = vcFriendly(error)
+            return false
+        }
+    }
+
+    /// Takes a banner down for the whole crew (author or recipient only).
+    func removeBanner(_ banner: VCBanner) {
+        guard canRemove(banner) else { return }
+        bannerError = nil
+        // Optimistic: it disappears at once; a failed delete brings it back on
+        // the next refresh along with the error.
+        banners.removeAll { $0.id == banner.id }
+        Task {
+            do {
+                let data = try JSONEncoder().encode(BannerDeleteRequest(user: username, id: banner.id))
+                _ = try await send("/api/banner", method: "DELETE", json: data, serverMessage: true)
+            } catch {
+                bannerError = "Couldn’t remove that banner: \(vcFriendly(error))"
+            }
+            await refreshBanners()
+        }
+    }
+
+    /// Hides a banner on this Mac only.
+    func dismissBanner(_ banner: VCBanner) {
+        dismissedBannerIDs.insert(banner.id)
+        saveDismissedBanners()
+    }
+
     // MARK: Devtime heartbeat
 
     /// Dev apps whose presence means "the user is coding". Mirrors the list in
@@ -778,6 +947,15 @@ final class VibecodersStore: NSObject, ObservableObject {
         }
     }
     private struct StatusClearRequest: Encodable { var user: String }
+    private struct BannersResp: Decodable { var banners: [VCBanner] }
+    private struct BannerWriteRequest: Encodable {
+        var user: String
+        var to: String
+        var emoji: String
+        var message: String
+    }
+    private struct BannerDeleteRequest: Encodable { var user: String; var id: Int64 }
+    private struct ServerError: Decodable { var error: String }
     private struct LeaderboardResp: Decodable {
         var entries: [VCLeaderboardEntry]
         var periodStart: Date?
@@ -821,7 +999,10 @@ final class VibecodersStore: NSObject, ObservableObject {
         try await send(path, method: "POST", json: json)
     }
 
-    private func send(_ path: String, method: String, json: Data? = nil) async throws -> Data {
+    /// `serverMessage` surfaces the backend's `{"error": …}` text instead of a
+    /// bare status code — opt-in so existing callers' messages don't change.
+    private func send(_ path: String, method: String, json: Data? = nil,
+                      serverMessage: Bool = false) async throws -> Data {
         var req = URLRequest(url: Self.apiBaseURL.appendingPathComponent(path))
         req.httpMethod = method
         if let json {
@@ -830,7 +1011,13 @@ final class VibecodersStore: NSObject, ObservableObject {
         }
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else { throw VCError.failed("HTTP \(status)") }
+        guard (200..<300).contains(status) else {
+            if serverMessage, let body = try? JSONDecoder().decode(ServerError.self, from: data),
+               !body.error.isEmpty {
+                throw VCError.failed(body.error)
+            }
+            throw VCError.failed("HTTP \(status)")
+        }
         return data
     }
 }

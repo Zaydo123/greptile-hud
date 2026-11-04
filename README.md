@@ -187,6 +187,13 @@ vibecoders integration with the `backend/` service:
 - **Crew statuses** — activity cards with preset accents, elapsed timers, and
   separate Online/Away indicators remain visible even while someone is away from
   their keyboard.
+- **Shout-out banners** — wish someone happy birthday (or congrats, welcome,
+  thanks, "shipped it") from Crew ▸ Shout-outs: pick a preset, optionally type
+  or click a recipient, tweak the text, **Post**. The banner rides across the
+  top of every crew member's HUD for 24 hours. Banners addressed to you come
+  first with a **For you** badge. ✕ hides one on your Mac; the author or the
+  recipient can right-click ▸ **Remove for Everyone**. Each person can have up
+  to 3 live banners.
 - **Profile photos** — click your avatar in Crew ▸ Devtime to pick a photo
   (right-click to remove). It's cropped to a square and shrunk to 256 px on
   your Mac before upload, then shown everywhere your initials used to be.

@@ -474,6 +474,9 @@ struct HUDView: View {
             VStack(spacing: 0) {
                 header
                 tabBar
+                if vibecoders.hasUsername {
+                    CrewBannerStrip(vibecoders: vibecoders)
+                }
                 if let err = store.errorText {
                     banner(err, color: Tokyo.orange, icon: "exclamationmark.triangle.fill")
                 }
@@ -892,6 +895,7 @@ struct HUDView: View {
                     StatusesView(store: statuses, vibecoders: vibecoders,
                                  onChanged: onStatusChanged)
                     if vibecoders.hasUsername {
+                        BannerComposer(vibecoders: vibecoders, onTextEditing: onTextEditing)
                         if !vibecoders.crewStatuses.isEmpty { crewStatusStrip }
                         onlineStrip
                         devtimeSection

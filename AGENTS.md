@@ -29,6 +29,8 @@ The app:
   and active-status fetches, and trust-based username handling (no OAuth, no tokens).
 - `Sources/Usage.swift`: app & site usage — the on-device catalog that maps
   the frontmost app / browser tab to a fixed key (or `other`), and the sampler.
+- `Sources/Banners.swift`: crew shout-out banners — the strip under the tab
+  bar (`CrewBannerStrip`) and the Crew-tab composer (`BannerComposer`).
 - `Sources/CrewCharts.swift`: Crew visuals — cached profile photos
   (`CrewAvatar`), usage breakdown bars, devtime-by-day columns, activity totals.
 - `Sources/Updater.swift`: GitHub Releases checking, validation, installation,
@@ -192,6 +194,17 @@ clicked control looking idle while its request is in flight.
   online window; presence and an explicitly running status are separate states.
 - Queue active-status writes in order so a quick Start then Stop cannot leave a
   stale remote status behind.
+
+## Crew banners
+
+- Banners are time-boxed (server-enforced 1–72h, default 24h) and capped at 3
+  live per author; the cap lives inside the INSERT so it is atomic. Keep both —
+  identity is trust-based, so these are the only spam guards.
+- ✕ is a local dismissal (UserDefaults, pruned to live ids). Removing for
+  everyone is a server DELETE allowed to the author *or* the recipient.
+- Banners addressed to the current user sort first in `visibleBanners`.
+- The strip shows only for joined users, never resizes the window, and its
+  accents come from `Tokyo.banner(_:)`.
 
 ## App & site usage
 

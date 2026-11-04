@@ -1,5 +1,8 @@
 # HUD improvements
 
+- Added crew shout-out banners: post a 24h banner (🎂 Birthday, 🎉 Congrats, 🚀 Shipped, 👋 Welcome, 🙌 Thanks or custom text), optionally for a specific crew member, from Crew ▸ Shout-outs; it shows across the top of every crew HUD, recipient's banners first with a "For you" badge.
+- Backend: new `banners` table and `GET /api/banners`, `POST /api/banner`, `DELETE /api/banner` (3 live per author, 1–72h expiry, author-or-recipient removal), with validation, routing and SQL lockstep tests.
+
 - Focus activity now requires computer activity: it auto-stops when the user
   has been idle past the presence cutoff, so a walk-away doesn't keep accruing
   focus time ("Focus stops when you're idle" hint on the running card).

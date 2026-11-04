@@ -51,6 +51,18 @@ enum Tokyo {
         }
     }
 
+    /// Accent for a crew banner, keyed by its emoji like `activity(_:)`.
+    static func banner(_ emoji: String) -> Color {
+        switch BannerPreset(rawValue: emoji) {
+        case .birthday: return magenta
+        case .congrats: return yellow
+        case .shipped: return cyan
+        case .welcome: return green
+        case .thanks: return orange
+        case nil: return blue
+        }
+    }
+
     /// Raised row / card fill. `level` walks from a barely-there wash (0) to a
     /// hovered, clearly-lifted surface (3).
     static func surface(_ level: Int) -> Color {
