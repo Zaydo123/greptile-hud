@@ -450,16 +450,22 @@ func TestNewEndpointsRejectBadInput(t *testing.T) {
 		{"avatar bad user", s.handlePutAvatar, http.MethodPut, "/api/avatar", `{"user":"bad name","image":"x"}`, "missing or invalid user"},
 		{"avatar bad base64", s.handlePutAvatar, http.MethodPut, "/api/avatar", `{"user":"zayd","image":"@@@"}`, "base64"},
 		{"avatar too small", s.handlePutAvatar, http.MethodPut, "/api/avatar", `{"user":"zayd","image":"` + png64 + `"}`, "pixels"},
+		{"avatar missing image", s.handlePutAvatar, http.MethodPut, "/api/avatar", `{"user":"zayd"}`, "image is required"},
+		{"avatar non-image base64", s.handlePutAvatar, http.MethodPut, "/api/avatar", `{"user":"zayd","image":"aGVsbG8="}`, "image must be a PNG or JPEG"},
 		{"avatar delete bad json", s.handleDeleteAvatar, http.MethodDelete, "/api/avatar", `nope`, "invalid avatar payload"},
+		{"avatar delete missing user", s.handleDeleteAvatar, http.MethodDelete, "/api/avatar", `{"user":""}`, "missing or invalid user"},
 		{"avatar get no login", s.handleGetAvatar, http.MethodGet, "/api/avatar", ``, "missing or invalid login"},
+		{"avatar get invalid login", s.handleGetAvatar, http.MethodGet, "/api/avatar?login=bad%20name", ``, "missing or invalid login"},
 		{"usage bad json", s.handlePostUsage, http.MethodPost, "/api/usage", `{"user":`, "invalid usage payload"},
 		{"usage bad user", s.handlePostUsage, http.MethodPost, "/api/usage", `{"user":"","usage":[]}`, "missing or invalid user"},
 		{"usage too much", s.handlePostUsage, http.MethodPost, "/api/usage", `{"user":"zayd","usage":[{"key":"x","seconds":600},{"key":"y","seconds":600}]}`, "exceeds"},
 		{"usage get no login", s.handleGetUsage, http.MethodGet, "/api/usage?period=week", ``, "missing or invalid login"},
 		{"history bad json", s.handlePostStatusHistory, http.MethodPost, "/api/status/history", `[`, "invalid history payload"},
+		{"history missing user", s.handlePostStatusHistory, http.MethodPost, "/api/status/history", `{"user":"","sessions":[{}]}`, "missing or invalid user"},
 		{"history empty", s.handlePostStatusHistory, http.MethodPost, "/api/status/history", `{"user":"zayd","sessions":[]}`, "1 to 200"},
 		{"history all invalid", s.handlePostStatusHistory, http.MethodPost, "/api/status/history", `{"user":"zayd","sessions":[{"id":"nope"}]}`, "no valid sessions"},
 		{"history delete bad id", s.handleDeleteStatusHistory, http.MethodDelete, "/api/status/history", `{"user":"zayd","id":"nope"}`, "UUID"},
+		{"history delete missing user", s.handleDeleteStatusHistory, http.MethodDelete, "/api/status/history", `{"user":"","id":"3f2504e0-4f89-11d3-9a0c-0305e82c3301"}`, "missing or invalid user"},
 		{"history get no login", s.handleGetStatusHistory, http.MethodGet, "/api/status/history", ``, "missing or invalid login"},
 	}
 	for _, tc := range cases {
@@ -473,6 +479,23 @@ func TestNewEndpointsRejectBadInput(t *testing.T) {
 				t.Fatalf("body = %q, want it to contain %q", rec.Body.String(), tc.want)
 			}
 		})
+	}
+}
+
+func TestHandlePutAvatarRejectsOversizedBody(t *testing.T) {
+	// The body limit (avatarMaxBody) guards the base64 decode: a payload that
+	// large can only be a request to store a non-image or a huge file, so it
+	// is rejected before any decode or database work. Build it from the limit
+	// itself so the test tracks the constant.
+	big := `{"user":"zayd","image":"` + strings.Repeat("A", avatarMaxBody) + `"}`
+	rec := httptest.NewRecorder()
+	s := &server{}
+	s.handlePutAvatar(rec, httptest.NewRequest(http.MethodPut, "/api/avatar", strings.NewReader(big)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "image is too large") {
+		t.Fatalf("body = %q, want it to contain %q", rec.Body.String(), "image is too large")
 	}
 }
 
