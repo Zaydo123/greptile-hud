@@ -308,6 +308,7 @@ func TestValidateHistorySessions(t *testing.T) {
 		session(id, "", "", hourAgo, now),                                                        // no emoji/message
 		session(id, "☕️", strings.Repeat("a", statusMessageLimit+1), hourAgo, now),               // message too long
 		session(id, "☕️", "", now, now),                                                          // zero length
+		session(id, "☕️", "", time.Time{}, time.Time{}),                                          // zero timestamps
 		session(id, "☕️", "", now, hourAgo),                                                      // reversed
 		session(id, "☕️", "", now.Add(-8*24*time.Hour), now),                                     // > 7 days
 		session(id, "☕️", "", now.Add(10*time.Minute), now.Add(time.Hour)),                       // future start
@@ -316,8 +317,8 @@ func TestValidateHistorySessions(t *testing.T) {
 		json.RawMessage(`{"id":"` + id + `","emoji":"x","started_at":"yesterday","ended_at":1}`), // malformed
 	}
 	valid, skipped := validateHistorySessions(in, now)
-	if len(valid) != 3 || skipped != 8 {
-		t.Fatalf("valid=%d skipped=%d, want 3 and 8 (%+v)", len(valid), skipped, valid)
+	if len(valid) != 3 || skipped != 9 {
+		t.Fatalf("valid=%d skipped=%d, want 3 and 9 (%+v)", len(valid), skipped, valid)
 	}
 	first := valid[0]
 	if first.ID != "3f2504e0-4f89-11d3-9a0c-0305e82c3301" || first.Emoji != "☕️" || first.Message != "coffee" {
@@ -466,6 +467,7 @@ func TestNewEndpointsRejectBadInput(t *testing.T) {
 		{"history all invalid", s.handlePostStatusHistory, http.MethodPost, "/api/status/history", `{"user":"zayd","sessions":[{"id":"nope"}]}`, "no valid sessions"},
 		{"history delete bad id", s.handleDeleteStatusHistory, http.MethodDelete, "/api/status/history", `{"user":"zayd","id":"nope"}`, "UUID"},
 		{"history delete missing user", s.handleDeleteStatusHistory, http.MethodDelete, "/api/status/history", `{"user":"","id":"3f2504e0-4f89-11d3-9a0c-0305e82c3301"}`, "missing or invalid user"},
+		{"history delete bad json", s.handleDeleteStatusHistory, http.MethodDelete, "/api/status/history", `nope`, "invalid history payload"},
 		{"history get no login", s.handleGetStatusHistory, http.MethodGet, "/api/status/history", ``, "missing or invalid login"},
 	}
 	for _, tc := range cases {
@@ -510,6 +512,27 @@ func TestHistoryRejectsTooManySessions(t *testing.T) {
 	s.handlePostStatusHistory(rec, httptest.NewRequest(http.MethodPost, "/api/status/history", strings.NewReader(body)))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestHandlePostUsageEmptyItemsSkipsDB(t *testing.T) {
+	// Items whose seconds clamp to zero (0, negative, NaN) leave
+	// normalizeUsage with nothing to store, so the handler answers 200
+	// directly — a harmless one-minute flush with nothing to report must not
+	// fail, and must not touch the database. A nil server proves it.
+	s := &server{}
+	for _, body := range []string{
+		`{"user":"zayd","usage":[{"key":"youtube","seconds":0}]}`,
+		`{"user":"zayd","usage":[{"key":"youtube","seconds":-3}]}`,
+	} {
+		rec := httptest.NewRecorder()
+		s.handlePostUsage(rec, httptest.NewRequest(http.MethodPost, "/api/usage", strings.NewReader(body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"ok":true`) {
+			t.Fatalf("body = %q, want it to contain \"ok\":true", rec.Body.String())
+		}
 	}
 }
 
