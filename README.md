@@ -243,6 +243,41 @@ switch off to stop tracking entirely.
 Menu-bar: Vibecoders ▸ Join the devtime leaderboard, Online now, Leaderboard,
 Refresh, Change username, Forget username.
 
+## Screenshot Shelf (opt-in)
+
+A replacement for macOS's floating screenshot thumbnail, aimed at multi-monitor
+setups. Turn it on from the menu-bar icon ▸ **Screenshot Shelf ▸ Copy
+Screenshots & Keep Them in the Corner**. From then on, every screenshot
+(⌘⇧3, ⌘⇧4, ⌘⇧5):
+
+- is **copied to the clipboard** right away, both as an image (for chats and
+  docs) and as the file (for Finder, Terminal, uploads). It's still saved to
+  your screenshot folder as usual;
+- shows a thumbnail in the bottom-right corner of **the display it was taken
+  on**, not your main display. New shots stack above older ones;
+- **stays put** for 15 s, 30 s, 1 min (default), 5 min, or until you dismiss
+  it (**Screenshot Shelf ▸ Keep on Screen**). Hovering pauses the countdown;
+- **⌘V pastes the newest screenshot; ⌘⇧V pastes all of them.** Take a few
+  screenshots, then press ⌘⇧V and every screenshot still on the shelf is
+  pasted at once (oldest first) into Slack, Messages, Finder and the like.
+  Afterwards the clipboard goes back to just the newest one. ⌘⇧V only
+  belongs to the shelf while it holds two or more screenshots; the rest of the
+  time it's the app's usual "Paste and Match Style". Pasting for you uses the
+  Accessibility access the app already has; without it, ⌘⇧V puts the batch on
+  the clipboard and you press ⌘V yourself;
+- can be **dragged** onto any app or display (it drops a copy, so the original
+  stays where it was saved), **clicked** to open it, or copied again, shown in
+  Finder, moved to the Trash, or dismissed with the buttons under it.
+
+While it's on, the shelf switches off macOS's own floating thumbnail (⌘⇧5 ▸
+Options ▸ Show Floating Thumbnail). Otherwise macOS holds the file back until
+its thumbnail goes away and you'd get two thumbnails in a row. Turning the
+shelf off puts that setting back the way it was. The shelf follows the
+**Save to** folder you pick in ⌘⇧5 ▸ Options. If that's your Desktop,
+Documents, or Downloads, macOS asks once to let Greptile HUD read it.
+Screenshots never leave your Mac. Screenshots taken straight to the clipboard
+(⌃⌘⇧3/4) aren't saved as files, so the shelf doesn't see them.
+
 ## Updates and releases
 
 Greptile HUD checks GitHub Releases shortly after launch and every six hours
@@ -314,6 +349,8 @@ That's the only setup. After that, just hold Right Shift anywhere.
 - **Refresh now** — force a resync (it also auto-refreshes every 60s and on every peek)
 - **Check for Updates…** — check immediately; background checks also run every six hours.
   When an update is waiting this reads **Install Update x.y.z…** (or shows download progress)
+- **Screenshot Shelf** — opt-in clipboard-and-corner screenshot thumbnails, and
+  how long they stay on screen (see [Screenshot Shelf](#screenshot-shelf-opt-in))
 - **About Greptile HUD…** — current version, a link to the repo, and signing status
 - **Quit**
 

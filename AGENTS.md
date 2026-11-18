@@ -33,6 +33,8 @@ The app:
   bar (`CrewBannerStrip`) and the Crew-tab composer (`BannerComposer`).
 - `Sources/CrewCharts.swift`: Crew visuals — cached profile photos
   (`CrewAvatar`), usage breakdown bars, devtime-by-day columns, activity totals.
+- `Sources/Screenshots.swift`: the opt-in Screenshot Shelf — screenshot-folder
+  watcher (`ScreenshotWatcher`), clipboard copy, and per-display corner cards.
 - `Sources/Updater.swift`: GitHub Releases checking, validation, installation,
   and relaunch logic.
 - `backend/`: Go + Postgres "vibecoders" service (devtime leaderboard, active
@@ -217,6 +219,27 @@ clicked control looking idle while its request is in flight.
   silently lost. Add "major" apps/sites only; nothing private or niche.
 - No counting while idle (`UsageTracker.idleCutoff`), and the
   "Share my app & site time" switch must stop both sampling and uploads.
+
+## Screenshot Shelf
+
+- Off by default; it only starts after the menu toggle. While off, it must not
+  read the screenshot folder at all (that read is what triggers the
+  Desktop-access prompt).
+- Screenshots are recognised by the file's own `kMDItemIsScreenCapture`
+  extended attribute, and placed on the display from
+  `kMDItemScreenCaptureGlobalRect` (`x, y, w, h` in global points, top-left
+  origin), falling back to the display under the pointer. Read the xattrs
+  directly — don't depend on Spotlight indexing.
+- Turning it on switches off `com.apple.screencapture show-thumbnail` and
+  remembers the old value; turning it off must restore exactly that value.
+  Never touch other screencapture settings.
+- ⌘⇧V (paste all) is a Carbon hot key (`GlobalHotKey`) registered **only while
+  the shelf holds 2+ screenshots**, so apps keep "Paste and Match Style" the
+  rest of the time. It writes one pasteboard item per screenshot, posts ⌘V once
+  Shift is released, then restores the newest screenshot alone — but only if
+  the clipboard hasn't changed since. Plain ⌘V is never intercepted.
+- Drags offer `.copy` only; the shelf never moves or renames a screenshot
+  (Trash is an explicit button). Nothing about screenshots is uploaded.
 
 ## Stacked pull requests
 

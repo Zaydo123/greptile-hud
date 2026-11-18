@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let statuses = StatusStore()
     private let usage = UsageTracker()
     private let updater = UpdateController()
+    private let shots = ScreenshotShelf()
     private var historySync: AnyCancellable?
 
     private var panel: NSPanel!
@@ -53,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await vibecoders.refresh() }
         vibecoders.publishStatus(statuses.active)
         usage.start()
+        shots.start()
         // Completed statuses go to the server shortly after they change
         // (stop, rename, auto-stop), and once at launch to catch up.
         historySync = statuses.$sessions
@@ -136,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(refresh)
         menu.addItem(updates)
         menu.addItem(reset)
+        addScreenshotMenu(menu)
 
         menu.addItem(.separator())
         addStatusMenu(menu)
@@ -155,6 +158,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(access)
         menu.addItem(quit)
     }
+
+    /// Opt-in screenshot shelf: on/off and how long each thumbnail stays put.
+    private func addScreenshotMenu(_ menu: NSMenu) {
+        let root = NSMenuItem(title: "Screenshot Shelf", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        let on = shots.isEnabled
+
+        let toggle = NSMenuItem(title: "Copy Screenshots & Keep Them in the Corner",
+                                action: #selector(toggleScreenshotShelf), keyEquivalent: "")
+        toggle.target = self
+        toggle.state = on ? .on : .off
+        sub.addItem(toggle)
+        let note = NSMenuItem(title: on ? "Replaces macOS’s screenshot thumbnail while on"
+                                        : "Off — macOS’s own thumbnail is in charge",
+                              action: nil, keyEquivalent: "")
+        note.isEnabled = false
+        sub.addItem(note)
+        let paste = NSMenuItem(title: "⌘V pastes the newest · ⌘⇧V pastes all on the shelf",
+                               action: nil, keyEquivalent: "")
+        paste.isEnabled = false
+        sub.addItem(paste)
+
+        sub.addItem(.separator())
+        let header = NSMenuItem(title: "Keep on Screen", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        sub.addItem(header)
+        for (index, option) in ScreenshotShelf.lifetimes.enumerated() {
+            let item = NSMenuItem(title: option.label, action: #selector(setScreenshotLifetime(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            item.state = shots.lifetime == option.seconds ? .on : .off
+            item.isEnabled = on
+            sub.addItem(item)
+        }
+
+        sub.addItem(.separator())
+        let folder = NSMenuItem(title: "Open Screenshots Folder", action: #selector(openScreenshotsFolder), keyEquivalent: "")
+        folder.target = self
+        sub.addItem(folder)
+
+        root.submenu = sub
+        menu.addItem(root)
+    }
+
+    @objc private func toggleScreenshotShelf() { shots.setEnabled(!shots.isEnabled) }
+
+    @objc private func setScreenshotLifetime(_ sender: NSMenuItem) {
+        guard ScreenshotShelf.lifetimes.indices.contains(sender.tag) else { return }
+        shots.lifetime = ScreenshotShelf.lifetimes[sender.tag].seconds
+    }
+
+    @objc private func openScreenshotsFolder() { shots.openFolder() }
 
     private func addStatusMenu(_ menu: NSMenu) {
         let header = NSMenuItem(title: "Status", action: nil, keyEquivalent: "")
