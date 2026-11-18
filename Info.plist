@@ -28,6 +28,12 @@
     <string>NSApplication</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Greptile HUD reads the active tab's address to tell which major site you're on (e.g. YouTube or GitHub). Only the site's category key is shared with your Crew — never the URL.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Screenshot Shelf (off unless you turn it on) watches your screenshots folder so new screenshots can be copied to the clipboard and shown in the corner. Screenshots never leave this Mac.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Screenshot Shelf (off unless you turn it on) watches your screenshots folder so new screenshots can be copied to the clipboard and shown in the corner. Screenshots never leave this Mac.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Screenshot Shelf (off unless you turn it on) watches your screenshots folder so new screenshots can be copied to the clipboard and shown in the corner. Screenshots never leave this Mac.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Greptile HUD</string>
 </dict>

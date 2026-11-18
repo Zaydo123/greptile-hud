@@ -38,6 +38,7 @@ SOURCES=(
     "$ROOT/Sources/Usage.swift"
     "$ROOT/Sources/CrewCharts.swift"
     "$ROOT/Sources/Banners.swift"
+    "$ROOT/Sources/Screenshots.swift"
     "$ROOT/Sources/HUDView.swift"
     "$ROOT/Sources/main.swift"
 )
