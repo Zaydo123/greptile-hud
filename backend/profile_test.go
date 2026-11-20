@@ -86,6 +86,34 @@ func TestAggregateActivitiesSkipsNonPositiveClip(t *testing.T) {
 	}
 }
 
+// A bounded period that has already ended (e.g. last week) must clip at the
+// period end, never at `now`: time recorded after the window is over would
+// otherwise leak into a past period's totals. Every other test passes
+// end == now or end in the future, so this is the one place the limit=end
+// branch (a window that ended before now) is exercised.
+func TestAggregateActivitiesClipsToPastPeriodEnd(t *testing.T) {
+	base := time.Date(2026, time.October, 7, 9, 0, 0, 0, time.UTC)
+	end := base.Add(6 * time.Hour)  // the period ended 6h after its start
+	now := base.Add(24 * time.Hour) // "today" is much later
+
+	// Span starts inside the window and runs 4h past the period end: the
+	// overlap is the 6h window, not the 10h span, and not now.
+	spans := []activitySpan{
+		{Emoji: "☕️", StartedAt: base.Add(1 * time.Hour), EndedAt: base.Add(10 * time.Hour)},
+		// Entirely after the period end but before now: a clip at now would
+		// count it; a clip at the period end must drop it.
+		{Emoji: "🚽", StartedAt: base.Add(8 * time.Hour), EndedAt: base.Add(9 * time.Hour)},
+	}
+
+	got := aggregateActivities(spans, base, end, now)
+	if len(got) != 1 {
+		t.Fatalf("aggregateActivities = %d totals, want 1 (post-period span must be dropped)", len(got))
+	}
+	if got[0].Seconds != 5*3600 {
+		t.Fatalf("clipped seconds = %d, want %d (clip at period end, not now)", got[0].Seconds, 5*3600)
+	}
+}
+
 func TestDenseDailySeriesIsGapFree(t *testing.T) {
 	now := time.Date(2026, time.October, 14, 12, 0, 0, 0, time.UTC)
 	window := crewDayPeriod(now) // today 00:00 -> tomorrow 00:00
