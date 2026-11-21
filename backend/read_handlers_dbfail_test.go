@@ -1,7 +1,8 @@
 package main
 
 // Coverage for the database-failure path of the read handlers in
-// leaderboard.go, statuses.go, usage.go, banners.go and avatar.go: what a
+// leaderboard.go, statuses.go, status_history.go, usage.go, banners.go and
+// avatar.go: what a
 // degraded deployment (unreachable Postgres) returns for each top-level
 // endpoint. These branches log and answer 500 with a stable message; a bad
 // refactor that drops the guard and panics on a nil rows / a closed db would
@@ -30,6 +31,7 @@ func TestReadHandlersReturn500WhenDBDown(t *testing.T) {
 		{"leaderboard", s.handleLeaderboard, http.MethodGet, "/api/leaderboard?period=week", "", "leaderboard query failed"},
 		{"online", s.handleOnline, http.MethodGet, "/api/online", "", "online query failed"},
 		{"statuses", s.handleStatuses, http.MethodGet, "/api/statuses", "", "status query failed"},
+		{"status history", s.handleGetStatusHistory, http.MethodGet, "/api/status/history?login=zayd&limit=5", "", "history query failed"},
 		{"user profile", s.handleUser, http.MethodGet, "/api/user?login=zayd", "", "user lookup failed"},
 		{"single usage", s.handleGetUsage, http.MethodGet, "/api/usage?login=zayd", "", "usage query failed"},
 		{"crew usage", s.handleGetCrewUsage, http.MethodGet, "/api/usage/crew?period=week", "", "usage query failed"},

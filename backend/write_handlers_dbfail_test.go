@@ -65,6 +65,7 @@ func TestWriteHandlersReturn500WhenDBDown(t *testing.T) {
 		{"put avatar", s.handlePutAvatar, http.MethodPut, `{"user":"zayd","image":"` + validAvatarB64(t) + `"}`, "could not save avatar"},
 		{"delete avatar", s.handleDeleteAvatar, http.MethodDelete, `{"user":"zayd"}`, "could not delete avatar"},
 		{"post history", s.handlePostStatusHistory, http.MethodPost, `{"user":"zayd","sessions":[` + historySession + `]}`, "could not store history"},
+		{"delete history", s.handleDeleteStatusHistory, http.MethodDelete, `{"user":"zayd","id":"9f8c5b3a-4d2e-4f1a-9b6c-2e3d4f5a6b7c"}`, "could not delete session"},
 	}
 
 	for _, tc := range cases {
