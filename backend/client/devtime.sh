@@ -57,7 +57,9 @@ while true; do
   fi
 
   if [ -n "$running" ]; then
-    if ! curl -s -o /dev/null -m 10 \
+    # -f makes curl exit non-zero on an HTTP error (4xx/5xx); without it a
+    # rejected heartbeat looks like a success and nothing is ever logged.
+    if ! curl -fsS -o /dev/null -m 10 \
         -H "Content-Type: application/json" \
         -d "{\"user\":\"$USER\",\"app\":\"$running\"}" \
         "$API_URL/api/pulse"; then
