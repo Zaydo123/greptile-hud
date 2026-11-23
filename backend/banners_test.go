@@ -8,6 +8,7 @@ package main
 // Stdlib only — no new dependency.
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -141,4 +142,94 @@ func TestBannerSQLLockstep(t *testing.T) {
 	if got := strings.Count(src, "LIMIT 20"); got != 1 {
 		t.Errorf("banners.go contains LIMIT 20 %d times, want exactly 1", got)
 	}
+}
+
+func TestBannerRowDecoding(t *testing.T) {
+	created := time.Date(2026, 11, 20, 9, 30, 0, 0, time.UTC)
+	expires := created.Add(24 * time.Hour)
+	avatarAt := time.Unix(1_700_000_000, 0).UTC()
+
+	base := func() bannerRow {
+		return bannerRow{
+			id:        7,
+			author:    "zayd",
+			emoji:     "\U0001F382",
+			message:   "Happy birthday!",
+			createdAt: created,
+			expiresAt: expires,
+		}
+	}
+
+	t.Run("crew-wide banner has no recipient", func(t *testing.T) {
+		row := base()
+		row.authorName = sql.NullString{String: "Zayd Alzein", Valid: true}
+		b := row.banner()
+
+		if b.ID != 7 || b.Author != "zayd" || b.AuthorName != "Zayd Alzein" ||
+			b.Emoji != "\U0001F382" || b.Message != "Happy birthday!" ||
+			!b.CreatedAt.Equal(created) || !b.ExpiresAt.Equal(expires) {
+			t.Fatalf("banner() = %+v, want the row's own fields copied through", b)
+		}
+		if b.To != nil || b.ToName != nil || b.ToAvatarURL != nil {
+			t.Fatalf("crew-wide banner = (%v, %v, %v), want all recipient fields nil",
+				b.To, b.ToName, b.ToAvatarURL)
+		}
+	})
+
+	t.Run("author name falls back to login", func(t *testing.T) {
+		b := base().banner()
+		if b.AuthorName != "zayd" {
+			t.Fatalf("AuthorName = %q, want the login fallback", b.AuthorName)
+		}
+	})
+
+	t.Run("joined recipient uses canonical login, name and avatar", func(t *testing.T) {
+		row := base()
+		row.toLogin = sql.NullString{String: "alice", Valid: true}
+		row.toUserLogin = sql.NullString{String: "Alice", Valid: true}
+		row.toName = sql.NullString{String: "Alice Chen", Valid: true}
+		row.toAvatarAt = sql.NullTime{Time: avatarAt, Valid: true}
+		b := row.banner()
+
+		if b.To == nil || *b.To != "Alice" {
+			t.Fatalf("To = %v, want the canonical login Alice", b.To)
+		}
+		if b.ToName == nil || *b.ToName != "Alice Chen" {
+			t.Fatalf("ToName = %v, want Alice Chen", b.ToName)
+		}
+		want := "/api/avatar?login=Alice&v=1700000000"
+		if b.ToAvatarURL == nil || *b.ToAvatarURL != want {
+			t.Fatalf("ToAvatarURL = %v, want %q", b.ToAvatarURL, want)
+		}
+	})
+
+	t.Run("unjoined recipient keeps the written login and has no avatar", func(t *testing.T) {
+		row := base()
+		row.toLogin = sql.NullString{String: "Bobby", Valid: true}
+		b := row.banner()
+
+		if b.To == nil || *b.To != "Bobby" {
+			t.Fatalf("To = %v, want Bobby", b.To)
+		}
+		if b.ToName == nil || *b.ToName != "Bobby" {
+			t.Fatalf("ToName = %v, want the login fallback Bobby", b.ToName)
+		}
+		if b.ToAvatarURL != nil {
+			t.Fatalf("ToAvatarURL = %v, want nil for a user with no avatar row", *b.ToAvatarURL)
+		}
+	})
+
+	t.Run("joined recipient without a display name falls back to login", func(t *testing.T) {
+		row := base()
+		row.toLogin = sql.NullString{String: "ALICE", Valid: true}
+		row.toUserLogin = sql.NullString{String: "alice", Valid: true}
+		b := row.banner()
+
+		if b.To == nil || *b.To != "alice" || b.ToName == nil || *b.ToName != "alice" {
+			t.Fatalf("banner() = (%v, %v), want alice/alice", b.To, b.ToName)
+		}
+		if b.ToAvatarURL != nil {
+			t.Fatalf("ToAvatarURL = %v, want nil without an avatar row", *b.ToAvatarURL)
+		}
+	})
 }
