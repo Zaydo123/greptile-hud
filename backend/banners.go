@@ -53,6 +53,47 @@ type bannerInput struct {
 	ttl     time.Duration
 }
 
+// bannerRow is one raw row from the live-banner query. It exists so the
+// column decoding lives in banner(), where it can be tested without a
+// database — the recipient joins are nullable and the canonical-casing rule
+// is easy to break silently.
+type bannerRow struct {
+	id          int64
+	author      string
+	authorName  sql.NullString
+	toLogin     sql.NullString // as written by the author
+	toUserLogin sql.NullString // recipient's canonical login, once they joined
+	toName      sql.NullString
+	toAvatarAt  sql.NullTime
+	emoji       string
+	message     string
+	createdAt   time.Time
+	expiresAt   time.Time
+}
+
+func (r bannerRow) banner() crewBanner {
+	b := crewBanner{
+		ID:        r.id,
+		Author:    r.author,
+		Emoji:     r.emoji,
+		Message:   r.message,
+		CreatedAt: r.createdAt,
+		ExpiresAt: r.expiresAt,
+	}
+	b.AuthorName = displayName(r.author, r.authorName.String)
+	if r.toLogin.Valid && r.toLogin.String != "" {
+		// Prefer the recipient's canonical casing once they've joined.
+		login := r.toLogin.String
+		if r.toUserLogin.Valid {
+			login = r.toUserLogin.String
+		}
+		name := displayName(login, r.toName.String)
+		b.To, b.ToName = &login, &name
+		b.ToAvatarURL = avatarURL(login, r.toAvatarAt)
+	}
+	return b
+}
+
 // normalizeBanner validates the client-supplied banner fields. The message is
 // required (a lone emoji isn't much of a shout-out); the recipient is optional
 // but, when given, must be a valid login so the HUD can link it to a profile.
@@ -165,26 +206,13 @@ func (s *server) handleBanners(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]crewBanner, 0)
 	for rows.Next() {
-		var b crewBanner
-		var authorName, toLogin, toUserLogin, toName sql.NullString
-		var toAvatarAt sql.NullTime
-		if err := rows.Scan(&b.ID, &b.Author, &authorName, &toLogin, &toUserLogin, &toName,
-			&toAvatarAt, &b.Emoji, &b.Message, &b.CreatedAt, &b.ExpiresAt); err != nil {
+		var row bannerRow
+		if err := rows.Scan(&row.id, &row.author, &row.authorName, &row.toLogin, &row.toUserLogin,
+			&row.toName, &row.toAvatarAt, &row.emoji, &row.message, &row.createdAt, &row.expiresAt); err != nil {
 			logf("banners scan: %v", err)
 			continue
 		}
-		b.AuthorName = displayName(b.Author, authorName.String)
-		if toLogin.Valid && toLogin.String != "" {
-			// Prefer the recipient's canonical casing once they've joined.
-			login := toLogin.String
-			if toUserLogin.Valid {
-				login = toUserLogin.String
-			}
-			name := displayName(login, toName.String)
-			b.To, b.ToName = &login, &name
-			b.ToAvatarURL = avatarURL(login, toAvatarAt)
-		}
-		out = append(out, b)
+		out = append(out, row.banner())
 	}
 	if err := rows.Err(); err != nil {
 		logf("banners rows: %v", err)
