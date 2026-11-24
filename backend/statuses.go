@@ -29,6 +29,32 @@ type crewStatus struct {
 	AvatarURL *string   `json:"avatar_url"`
 }
 
+// statusRow is one raw row from the active-status query. Like bannerRow, it
+// keeps the nullable columns nullable so the handler's scan stays a straight
+// column dump and the display fallbacks (login for a missing name, "" for a
+// missing emoji/message, nil for no avatar row) live in one testable place.
+type statusRow struct {
+	login     string
+	name      sql.NullString
+	emoji     sql.NullString
+	message   sql.NullString
+	startedAt time.Time
+	lastSeen  sql.NullTime
+	avatarAt  sql.NullTime
+}
+
+func (r statusRow) status(now time.Time) crewStatus {
+	return crewStatus{
+		Login:     r.login,
+		Name:      displayName(r.login, r.name.String),
+		Emoji:     r.emoji.String,
+		Message:   r.message.String,
+		StartedAt: r.startedAt,
+		Online:    statusOnline(r.lastSeen, now),
+		AvatarURL: avatarURL(r.login, r.avatarAt),
+	}
+}
+
 type statusRequest struct {
 	User      string     `json:"user"`
 	Emoji     string     `json:"emoji"`
@@ -168,21 +194,15 @@ func (s *server) handleStatuses(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	out := make([]crewStatus, 0)
+	now := time.Now()
 	for rows.Next() {
-		var status crewStatus
-		var name, emoji, message sql.NullString
-		var lastSeen, avatarAt sql.NullTime
-		if err := rows.Scan(&status.Login, &name, &emoji, &message,
-			&status.StartedAt, &lastSeen, &avatarAt); err != nil {
+		var row statusRow
+		if err := rows.Scan(&row.login, &row.name, &row.emoji, &row.message,
+			&row.startedAt, &row.lastSeen, &row.avatarAt); err != nil {
 			logf("statuses scan: %v", err)
 			continue
 		}
-		status.Name = displayName(status.Login, name.String)
-		status.Emoji = emoji.String
-		status.Message = message.String
-		status.Online = statusOnline(lastSeen, time.Now())
-		status.AvatarURL = avatarURL(status.Login, avatarAt)
-		out = append(out, status)
+		out = append(out, row.status(now))
 	}
 	if err := rows.Err(); err != nil {
 		logf("statuses rows: %v", err)
