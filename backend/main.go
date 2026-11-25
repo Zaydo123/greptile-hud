@@ -128,6 +128,12 @@ func logRequests(next http.Handler) http.Handler {
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	// Every JSON response here is live crew data (statuses, leaderboards,
+	// usage, history) computed per request. Marking it no-store stops a proxy
+	// or an HTTP cache with heuristic freshness from serving a stale copy
+	// between polls. The avatar bytes and the landing page do not go through
+	// writeJSON, so their explicit caching is unaffected.
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
