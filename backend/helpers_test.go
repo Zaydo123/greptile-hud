@@ -109,6 +109,30 @@ func TestHTTPError(t *testing.T) {
 	}
 }
 
+func TestJSONResponsesAreNotCacheable(t *testing.T) {
+	// Both writeJSON and httpError must mark the response no-store: these
+	// payloads are live crew data computed per request, so a cached copy
+	// would show a stale leaderboard or statuses feed between polls. The
+	// handlers that set the header themselves (statuses, banners, history)
+	// get the same guarantee from this shared helper, and the avatar/landing
+	// page paths don't use it, so their explicit caching stays intact.
+	for name, write := range map[string]func(http.ResponseWriter){
+		"writeJSON": func(w http.ResponseWriter) { writeJSON(w, http.StatusOK, map[string]any{"ok": true}) },
+		"httpError": func(w http.ResponseWriter) { httpError(w, http.StatusBadRequest, "nope") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			write(rec)
+			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("Cache-Control = %q, want no-store", got)
+			}
+			if got := rec.Header().Get("Content-Type"); got != "application/json" {
+				t.Fatalf("Content-Type = %q, want application/json", got)
+			}
+		})
+	}
+}
+
 func TestLogRequests(t *testing.T) {
 	var called bool
 	h := logRequests(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
