@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -16,7 +15,7 @@ func (s *server) handlePulse(w http.ResponseWriter, r *http.Request) {
 		App  string `json:"app"`
 	}
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = decodeJSONBody(w, r, &body)
 	}
 	login := normalizeLogin(body.User)
 	if login == "" {
