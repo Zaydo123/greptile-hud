@@ -180,7 +180,7 @@ func (s *server) handleDeleteStatusHistory(w http.ResponseWriter, r *http.Reques
 		User string `json:"user"`
 		ID   string `json:"id"`
 	}
-	if r.Body == nil || json.NewDecoder(r.Body).Decode(&body) != nil {
+	if decodeJSONBody(w, r, &body) != nil {
 		httpError(w, http.StatusBadRequest, "invalid history payload")
 		return
 	}

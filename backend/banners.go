@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -137,7 +136,7 @@ func bannerTTL(hours int) time.Duration {
 //	POST /api/banner {"user", "to", "emoji", "message", "hours"}
 func (s *server) handlePostBanner(w http.ResponseWriter, r *http.Request) {
 	var body bannerRequest
-	if r.Body == nil || json.NewDecoder(r.Body).Decode(&body) != nil {
+	if decodeJSONBody(w, r, &body) != nil {
 		httpError(w, http.StatusBadRequest, "invalid banner payload")
 		return
 	}
@@ -233,7 +232,7 @@ func (s *server) handleDeleteBanner(w http.ResponseWriter, r *http.Request) {
 		User string `json:"user"`
 		ID   int64  `json:"id"`
 	}
-	if r.Body == nil || json.NewDecoder(r.Body).Decode(&body) != nil {
+	if decodeJSONBody(w, r, &body) != nil {
 		httpError(w, http.StatusBadRequest, "invalid banner payload")
 		return
 	}

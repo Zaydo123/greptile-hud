@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -147,4 +148,25 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// maxJSONBodyBytes caps the small JSON write payloads (status, banner, history
+// delete, pulse). The service is public and unauthenticated, so without a cap
+// an oversized POST is buffered whole — spooled to memory and then to disk —
+// before the decoder ever rejects it. The handlers with genuinely larger
+// payloads (avatar, usage, status history upload) set their own, bigger caps.
+const maxJSONBodyBytes = 64 * 1024
+
+// errNoBody is decodeJSONBody's error for a request with no body at all.
+var errNoBody = errors.New("missing request body")
+
+// decodeJSONBody decodes exactly one JSON value from the request body, reading
+// at most maxJSONBodyBytes. Handlers turn any error into their own 400, so the
+// only change from a bare json.NewDecoder(r.Body) is that a huge body is cut
+// off instead of being read to completion.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) error {
+	if r.Body == nil {
+		return errNoBody
+	}
+	return json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)).Decode(v)
 }

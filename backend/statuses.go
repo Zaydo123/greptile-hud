@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -106,7 +105,7 @@ func statusOnline(lastSeen sql.NullTime, now time.Time) bool {
 // Identity follows the rest of Vibecoders: a self-chosen, unauthenticated name.
 func (s *server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	var body statusRequest
-	if r.Body == nil || json.NewDecoder(r.Body).Decode(&body) != nil {
+	if decodeJSONBody(w, r, &body) != nil {
 		httpError(w, http.StatusBadRequest, "invalid status payload")
 		return
 	}
@@ -155,7 +154,7 @@ func (s *server) handleClearStatus(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		User string `json:"user"`
 	}
-	if r.Body == nil || json.NewDecoder(r.Body).Decode(&body) != nil {
+	if decodeJSONBody(w, r, &body) != nil {
 		httpError(w, http.StatusBadRequest, "invalid status payload")
 		return
 	}

@@ -107,8 +107,8 @@ func (s *server) handlePutAvatar(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "invalid avatar payload")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, avatarMaxBody)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	limited := http.MaxBytesReader(w, r.Body, avatarMaxBody)
+	if err := json.NewDecoder(limited).Decode(&body); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			httpError(w, http.StatusBadRequest, "image is too large")
@@ -165,7 +165,7 @@ func (s *server) handleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		User string `json:"user"`
 	}
-	if r.Body == nil || json.NewDecoder(r.Body).Decode(&body) != nil {
+	if decodeJSONBody(w, r, &body) != nil {
 		httpError(w, http.StatusBadRequest, "invalid avatar payload")
 		return
 	}
