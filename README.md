@@ -48,10 +48,15 @@ No tokens to paste — it uses your existing `gh` CLI auth.
 
 ## What each card shows
 
+Open PRs are grouped by repository: each repo gets a small header (name, owner,
+PR count), and the repo with the most recent activity comes first. Click a
+repo header to fold it; folded repos stay folded across launches. Stale PRs
+(no activity in 14 days) stay folded under **Stale**, grouped the same way.
+
 | Element | Meaning |
 |---|---|
 | Big number badge | Latest `Confidence Score: N/M` (green ≥80%, yellow ≥60%, orange ≥40%, red below). `—` = no review yet, spinner = first review running |
-| `owner/repo #123` | The PR, click anywhere on the row to open it in your browser |
+| `#123` (repo in the section header) | The PR, click anywhere on the row to open it in your browser |
 | `· N reviews` | How many times Greptile has reviewed (from its summary footer) |
 | Blue **reviewing · 2m 13s** + spinner | A 👀 reaction is live on a comment — Greptile is re-reviewing right now; timer counts from when the 👀 appeared |
 | ↻ button | Posts an `@greptile` comment to re-trigger a review |

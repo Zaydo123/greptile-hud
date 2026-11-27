@@ -454,6 +454,8 @@ struct HUDView: View {
     @State private var tab: Tab = .open
     @State private var navigationRevision = 0
     @State private var showStale: Bool = false
+    /// Newline-joined `owner/name` repos the user has folded on the Open tab.
+    @AppStorage("hud.open.collapsedRepos") private var collapsedReposRaw = ""
     @State private var staleHovered: Bool = false
     @State private var usernameDraft = ""
     private enum Tab { case open, merged, crew }
@@ -792,19 +794,12 @@ struct HUDView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    if !freshPRs.isEmpty {
-                        InsetList(items: freshPRs, dividerInset: 64) { pr in
-                            PRCard(pr: pr, store: store)
-                                .transition(.opacity)
-                        }
-                    }
+                    repoSections(freshPRs)
                     if !stalePRs.isEmpty {
                         staleDisclosure
                         if showStale {
-                            InsetList(items: stalePRs, dividerInset: 64) { pr in
-                                PRCard(pr: pr, store: store)
-                            }
-                            .transition(.opacity)
+                            repoSections(stalePRs)
+                                .transition(.opacity)
                         }
                     }
                 }
@@ -813,6 +808,36 @@ struct HUDView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// One collapsible header + `InsetList` per repository, in activity order.
+    @ViewBuilder private func repoSections(_ prs: [PR]) -> some View {
+        ForEach(PRRepoGroup.groups(from: prs)) { group in
+            let collapsed = collapsedRepos.contains(group.repo)
+            VStack(alignment: .leading, spacing: 2) {
+                RepoSectionHeader(group: group, collapsed: collapsed) {
+                    withAnimation(.easeInOut(duration: 0.18)) { toggleRepo(group.repo) }
+                }
+                if !collapsed {
+                    InsetList(items: group.prs, dividerInset: 64) { pr in
+                        PRCard(pr: pr, store: store, showRepo: false)
+                            .transition(.opacity)
+                    }
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    /// Repos folded on the Open tab, remembered across launches.
+    private var collapsedRepos: Set<String> {
+        Set(collapsedReposRaw.split(separator: "\n").map(String.init))
+    }
+
+    private func toggleRepo(_ repo: String) {
+        var set = collapsedRepos
+        if set.contains(repo) { set.remove(repo) } else { set.insert(repo) }
+        collapsedReposRaw = set.sorted().joined(separator: "\n")
     }
 
     /// Finder-sidebar–style section toggle.
@@ -2167,9 +2192,52 @@ struct OnlineAvatarButton: View {
 
 // MARK: - One PR row
 
+/// Disclosure header for one repo's PRs on the Open tab: click to fold.
+struct RepoSectionHeader: View {
+    let group: PRRepoGroup
+    let collapsed: Bool
+    let toggle: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .rotationEffect(.degrees(collapsed ? 0 : 90))
+                    .frame(width: 14)
+                    .foregroundStyle(Tokyo.comment)
+                Text(group.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(hovered ? Tokyo.fg : Tokyo.fgDim)
+                    .lineLimit(1)
+                if !group.owner.isEmpty {
+                    Text(group.owner)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Tokyo.comment)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Text("\(group.prs.count)")
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(Tokyo.comment)
+            }
+            .padding(.horizontal, 6)
+            .frame(maxWidth: .infinity, minHeight: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(collapsed ? "Show \(group.repo) pull requests" : "Hide \(group.repo) pull requests")
+    }
+}
+
 struct PRCard: View {
     let pr: PR
     @ObservedObject var store: PRStore
+    /// Off when the card sits under a repo section header that already names it.
+    var showRepo: Bool = true
     @State private var hovered = false
     @State private var scoreHovered = false
     /// Merging is irreversible, so the button arms on the first click and only
@@ -2185,8 +2253,10 @@ struct PRCard: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 HStack(spacing: 5) {
-                    Text(pr.repo.split(separator: "/").last.map(String.init) ?? pr.repo)
-                        .foregroundStyle(Tokyo.fgDim).lineLimit(1)
+                    if showRepo {
+                        Text(pr.repo.split(separator: "/").last.map(String.init) ?? pr.repo)
+                            .foregroundStyle(Tokyo.fgDim).lineLimit(1)
+                    }
                     Text("#\(pr.number)").foregroundStyle(Tokyo.comment)
                     if let rc = pr.reviewCount {
                         Text("·").foregroundStyle(Tokyo.comment)
