@@ -350,6 +350,31 @@ final class StatusStore: ObservableObject {
     }
 }
 
+// MARK: - Repo grouping
+
+/// Open PRs from one repository, for the Open tab's per-repo sections.
+struct PRRepoGroup: Identifiable, Equatable {
+    let repo: String        // "owner/name"
+    var prs: [PR]
+
+    var id: String { repo }
+    var owner: String { repo.split(separator: "/").first.map(String.init) ?? "" }
+    var name: String { repo.split(separator: "/").last.map(String.init) ?? repo }
+
+    /// Groups `prs` by repo without re-sorting anything: PRs keep their order
+    /// inside a group, and groups are ordered by their first PR — so the repo
+    /// with the most recent activity leads, matching the flat list's order.
+    static func groups(from prs: [PR]) -> [PRRepoGroup] {
+        var order: [String] = []
+        var byRepo: [String: [PR]] = [:]
+        for pr in prs {
+            if byRepo[pr.repo] == nil { order.append(pr.repo) }
+            byRepo[pr.repo, default: []].append(pr)
+        }
+        return order.map { PRRepoGroup(repo: $0, prs: byRepo[$0] ?? []) }
+    }
+}
+
 // MARK: - Merge trains
 
 /// A group of open PRs that share a repo and base branch — the candidate pool a
