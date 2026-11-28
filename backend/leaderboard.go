@@ -83,7 +83,10 @@ func (s *server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	var out []leaderboardEntry
+	// Empty must encode as [] and not null: the HUD decodes "entries" as a
+	// non-optional array, so a null there fails the whole Crew refresh. A
+	// fresh deploy has no rows, so this path is normal, not an edge case.
+	out := make([]leaderboardEntry, 0)
 	rank := 0
 	for rows.Next() {
 		var e leaderboardEntry
@@ -136,7 +139,9 @@ func (s *server) handleOnline(w http.ResponseWriter, r *http.Request) {
 		DevtimeToday int64     `json:"devtime_today"`
 		AvatarURL    *string   `json:"avatar_url"`
 	}
-	var out []entry
+	// Same rule as the leaderboard: an empty crew encodes as [] — the HUD
+	// decodes "online" as a non-optional array and a null breaks the refresh.
+	out := make([]entry, 0)
 	for rows.Next() {
 		var e entry
 		var name sql.NullString
